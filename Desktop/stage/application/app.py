@@ -30,6 +30,11 @@ CSV_TEST       = os.path.join(os.path.dirname(__file__), 'csv', 'T1_foyer_kevin.
 DOSSIER_DEFAUT = r'C:\Emissions-Output'
 
 PHASES_LABELS = {'HP': 'Haute Puissance', 'MP': 'Moyenne Puissance', 'BP': 'Basse Puissance'}
+PHASE_COLORS  = {
+    'HP': dict(fill='rgba(33,150,243,0.13)',  border='#1565C0', pos='top left'),
+    'MP': dict(fill='rgba(255,152,0,0.13)',   border='#E65100', pos='top right'),
+    'BP': dict(fill='rgba(76,175,80,0.13)',   border='#2E7D32', pos='bottom right'),
+}
 
 TEST_DEFAULTS = {
     'HP': dict(mb=1.820, mc=0.062, np=4, me=2.5, td=21.0, tf=91.5, hmc=4.41),
@@ -41,7 +46,7 @@ TEST_DEFAULTS = {
 # Session state
 # ─────────────────────────────────────────────────────────────────────
 if 'resultats' not in st.session_state:
-    st.session_state.resultats = {}   # {'HP': result, 'MP': result, 'BP': result}
+    st.session_state.resultats = {}
 if 'prev_mode_test' not in st.session_state:
     st.session_state.prev_mode_test = False
 
@@ -90,40 +95,22 @@ def estimer_fond(df_full):
 
 
 # ─────────────────────────────────────────────────────────────────────
-# Barre latérale
+# Barre latérale — données communes + CSV
 # ─────────────────────────────────────────────────────────────────────
 
 with st.sidebar:
     mode_test = st.toggle('🧪 Mode test (T1 — Foyer Kevin)', value=False)
 
-    # Quand le mode test change, on réinitialise les champs terrain
     if mode_test != st.session_state.prev_mode_test:
         st.session_state.prev_mode_test = mode_test
+        for k in ['tc', 'hc', 'ta', 'pr']:
+            if k in st.session_state:
+                del st.session_state[k]
         for p in ['HP', 'MP', 'BP']:
-            td = TEST_DEFAULTS[p]
-            for k in [f'mb_{p}', f'mc_{p}', f'hc_{p}', f'np_{p}']:
+            for k in [f'mb_{p}', f'mc_{p}', f'me_{p}', f'td_{p}', f'tf_{p}']:
                 if k in st.session_state:
                     del st.session_state[k]
-            for j in range(4):
-                for k in [f'ni_me_{p}_{j}', f'ni_td_{p}_{j}', f'ni_tf_{p}_{j}']:
-                    if k in st.session_state:
-                        del st.session_state[k]
         st.rerun()
-
-    st.divider()
-
-    # ── Sélecteur de phase ────────────────────────────────────────────
-    st.header('📊 Phase à analyser')
-    phase = st.radio('Phase', ['HP', 'MP', 'BP'], horizontal=True,
-                     label_visibility='collapsed')
-
-    # Statut des phases
-    cols_stat = st.columns(3)
-    for i, p in enumerate(['HP', 'MP', 'BP']):
-        if p in st.session_state.resultats:
-            cols_stat[i].success(f'✓ {p}')
-        else:
-            cols_stat[i].warning(f'· {p}')
 
     st.divider()
 
@@ -176,161 +163,69 @@ with st.sidebar:
     res_csv     = st.session_state.get(_CSV)
     nom_fichier = st.session_state.get(_NAME, '')
 
-    # ── Mesures de fond ───────────────────────────────────────────────
     st.divider()
-    st.header('📡 Mesures de fond')
 
+    # ── Données communes (saisies une seule fois) ─────────────────────
+    st.header('📋 Données communes')
+    st.caption('Ces paramètres s\'appliquent aux trois phases.')
+
+    td0 = TEST_DEFAULTS['HP']
+    liste_comb = list(COMBUSTIBLES.keys())
+    type_comb = st.selectbox('Type de combustible', liste_comb, index=0, key='tc')
+    hum_comb  = st.number_input('Humidité combustible (%)', min_value=0.0, max_value=100.0,
+                                 value=td0['hmc'] if mode_test else 6.0,
+                                 step=0.5, format='%.1f', key='hc')
+    T_atm    = st.number_input('Température ambiante (°C)', value=29.0,
+                                step=0.5, format='%.1f', key='ta')
+    pression = st.number_input('Pression atmosphérique (hPa)', value=1012.0,
+                                step=1.0, format='%.1f', key='pr')
+
+
+    # ── Paramètres avancés (zérotage capteurs) ────────────────────────
     if res_csv is not None:
         bg_pm_a, bg_co_a, bg_co2_a, bg_fl_a = estimer_fond(res_csv['donnees'])
     else:
         bg_pm_a, bg_co_a, bg_co2_a, bg_fl_a = 0.0, 0.0, 615.0, 9900.0
 
-    bg_pm_raw  = st.number_input('PM fond (logunits)',  value=bg_pm_a,  step=0.1, format='%.1f', key=f'bpm_{phase}')
-    bg_co_raw  = st.number_input('CO fond (logunits)',  value=bg_co_a,  step=0.1, format='%.1f', key=f'bco_{phase}')
-    bg_co2_ppm = st.number_input('CO2 fond (ppm)',      value=bg_co2_a, step=1.0, format='%.1f', key=f'bco2_{phase}')
-    baseline_flow = st.number_input('Zero-flux Flow',   value=bg_fl_a,  step=10.0, format='%.0f', key=f'bfl_{phase}')
+    with st.expander('⚙️ Paramètres avancés (zérotage capteurs)'):
+        st.caption('Estimés automatiquement depuis le début du CSV.')
+        bg_pm_raw     = st.number_input('PM ambiant (logunits)',  value=bg_pm_a,  step=0.1, format='%.1f', key='bpm')
+        bg_co_raw     = st.number_input('CO ambiant (logunits)',  value=bg_co_a,  step=0.1, format='%.1f', key='bco')
+        bg_co2_ppm    = st.number_input('CO₂ ambiant (ppm)',      value=bg_co2_a, step=1.0, format='%.1f', key='bco2')
+        baseline_flow = st.number_input('Débit ventilateur arrêté (logunits)',
+                                         value=bg_fl_a, step=10.0, format='%.0f', key='bfl')
 
-    # ── Conditions ────────────────────────────────────────────────────
     st.divider()
-    st.header('🌡️ Conditions')
-    T_atm    = st.number_input('T ambiante (°C)',    value=29.0,   step=0.5, format='%.1f', key=f'ta_{phase}')
-    pression = st.number_input('Pression (hPa)',     value=1012.0, step=1.0, format='%.1f', key=f'pr_{phase}')
 
-    # ── Données terrain ───────────────────────────────────────────────
-    st.divider()
-    st.header('🔥 Données terrain')
-
-    td = TEST_DEFAULTS[phase]
-    liste_comb = list(COMBUSTIBLES.keys())
-    type_comb  = st.selectbox('Type de combustible', liste_comb, index=0, key=f'tc_{phase}')
-    hum_comb   = st.number_input('Humidité combustible (%)', min_value=0.0, max_value=100.0,
-                                  value=td['hmc'] if mode_test else 6.0,
-                                  step=0.5, format='%.1f', key=f'hc_{phase}')
-    c1, c2 = st.columns(2)
-    mb = c1.number_input('Combustible (kg)', min_value=0.0,
-                          value=td['mb'] if mode_test else 1.0,
-                          step=0.01, format='%.3f', key=f'mb_{phase}')
-    mc = c2.number_input('Charbon (kg)', min_value=0.0,
-                          value=td['mc'] if mode_test else 0.0,
-                          step=0.001, format='%.3f', key=f'mc_{phase}')
-
-    nb_pots = st.selectbox('Nombre de pots', [1, 2, 3, 4],
-                            index=td['np'] - 1 if mode_test else 0,
-                            key=f'np_{phase}')
-    pots = []
-    for j in range(nb_pots):
-        k_me = f'ni_me_{phase}_{j}'
-        k_t0 = f'ni_td_{phase}_{j}'
-        k_tf = f'ni_tf_{phase}_{j}'
-        if k_me not in st.session_state: st.session_state[k_me] = float(td['me'] if mode_test else 2.0)
-        if k_t0 not in st.session_state: st.session_state[k_t0] = float(td['td'] if mode_test else 20.0)
-        if k_tf not in st.session_state: st.session_state[k_tf] = float(td['tf'] if mode_test else 90.0)
-
-        st.caption(f'Pot {j + 1}')
-        ca, cb, cc = st.columns([1, 4, 1])
-        ca.button('−', key=f'me_m_{phase}_{j}', use_container_width=True,
-                  on_click=_adj, args=(k_me, -0.1), kwargs={'min_val': 0.1})
-        cb.number_input('Eau (kg)', step=0.1, format='%.1f', min_value=0.1, key=k_me)
-        cc.button('+', key=f'me_p_{phase}_{j}', use_container_width=True,
-                  on_click=_adj, args=(k_me, 0.1))
-
-        ca, cb, cc = st.columns([1, 4, 1])
-        ca.button('−', key=f'td_m_{phase}_{j}', use_container_width=True,
-                  on_click=_adj, args=(k_t0, -1.0))
-        cb.number_input('T début (°C)', step=1.0, format='%.1f', key=k_t0)
-        cc.button('+', key=f'td_p_{phase}_{j}', use_container_width=True,
-                  on_click=_adj, args=(k_t0, 1.0))
-
-        ca, cb, cc = st.columns([1, 4, 1])
-        ca.button('−', key=f'tf_m_{phase}_{j}', use_container_width=True,
-                  on_click=_adj, args=(k_tf, -1.0))
-        cb.number_input('T fin (°C)', step=1.0, format='%.1f', key=k_tf)
-        cc.button('+', key=f'tf_p_{phase}_{j}', use_container_width=True,
-                  on_click=_adj, args=(k_tf, 1.0))
-
-        pots.append({
-            'masse_eau': st.session_state[k_me],
-            'T_debut'  : st.session_state[k_t0],
-            'T_fin'    : st.session_state[k_tf],
-        })
-
-    # ── Pesée gravimétrique du filtre PM ─────────────────────────────
-    st.divider()
-    st.header('⚖️ Filtre PM2.5 (optionnel)')
-    st.caption('Laisser à 0 si pas de pesée de filtre.')
-    f1, f2 = st.columns(2)
-    filtre_avant = f1.number_input('Filtre avant (mg)', min_value=0.0,
-                                    value=0.0, step=0.001, format='%.3f',
-                                    key=f'fa_{phase}')
-    filtre_apres = f2.number_input('Filtre après (mg)', min_value=0.0,
-                                    value=0.0, step=0.001, format='%.3f',
-                                    key=f'fp_{phase}')
-    if filtre_apres > filtre_avant > 0:
-        pm_gravi = round(filtre_apres - filtre_avant, 3)
-        st.success(f'PM gravimétrique : **{pm_gravi} mg**')
-    elif filtre_apres > 0 and filtre_apres <= filtre_avant:
-        st.warning('Filtre après doit être > filtre avant.')
-
-    # ── Bouton analyser ───────────────────────────────────────────────
-    st.divider()
-    if st.button(f'▶  Analyser la phase {phase}', type='primary',
-                 use_container_width=True, disabled=(res_csv is None)):
-        donnees_ext = {
-            'type_combustible': type_comb,
-            'masse_bois_kg'   : mb,
-            'masse_charbon_kg': mc,
-            'humidite_pct'    : hum_comb,
-            'pots'            : pots,
-            'T_atm'           : T_atm,
-            'p_Pa'            : pression * 100.0,
-            'baseline_flow'   : baseline_flow,
-            'bg_pm_raw'       : bg_pm_raw,
-            'bg_co_raw'       : bg_co_raw,
-            'bg_co2_ppm'      : bg_co2_ppm,
-            'filtre_avant_mg' : filtre_avant,
-            'filtre_apres_mg' : filtre_apres,
-        }
-        _iv = st.session_state.get(f'intervalle_{phase}')
-        if _iv:
-            donnees_ext['t_debut_s'] = _iv[0] * 60.0
-            donnees_ext['t_fin_s']   = _iv[1] * 60.0
-        with st.spinner(f'Calculs phase {phase}...'):
-            result = analyser(res_csv, donnees_ext)
-        result['_fichier'] = nom_fichier
-        # PM gravimétrique
-        if filtre_apres > filtre_avant > 0:
-            result['_pm_gravi_mg'] = round(filtre_apres - filtre_avant, 3)
+    # ── Statut des phases + reset ─────────────────────────────────────
+    st.caption('Statut des phases')
+    cols_stat = st.columns(3)
+    for i, p in enumerate(['HP', 'MP', 'BP']):
+        if p in st.session_state.resultats:
+            cols_stat[i].success(f'✓ {p}')
         else:
-            result['_pm_gravi_mg'] = None
-        st.session_state.resultats[phase] = result
-        st.success(f'Phase {phase} analysée — {result["duree_min"]:.1f} min')
-        st.rerun()
-
-    if res_csv is None:
-        st.info('Chargez un CSV pour analyser.')
+            cols_stat[i].warning(f'· {p}')
 
     if st.session_state.resultats:
-        st.divider()
-        if st.button('🗑️  Réinitialiser', use_container_width=True):
+        if st.button('🗑️  Réinitialiser les résultats', use_container_width=True):
             st.session_state.resultats = {}
             st.rerun()
 
 
 # ─────────────────────────────────────────────────────────────────────
-# Zone principale
+# Zone principale — Graphe CSV
 # ─────────────────────────────────────────────────────────────────────
 
-# ── Aperçu CSV ────────────────────────────────────────────────────────
 if res_csv is not None:
     df0       = res_csv['donnees']
     duree_tot = (df0['seconds'].max() - df0['seconds'].min()) / 60.0
 
-    st.subheader(f'📄 {nom_fichier} — Phase {phase} ({PHASES_LABELS[phase]})')
+    st.subheader(f'📄 {nom_fichier}')
     m1, m2, m3, m4 = st.columns(4)
-    m1.metric('Date',          res_csv['date'])
-    m2.metric('Heure début',   res_csv['heure'])
-    m3.metric('Durée totale',  f'{duree_tot:.1f} min')
-    m4.metric('Nb mesures',    f'{len(df0)}')
+    m1.metric('Date',         res_csv['date'])
+    m2.metric('Heure début',  res_csv['heure'])
+    m3.metric('Durée totale', f'{duree_tot:.1f} min')
+    m4.metric('Nb mesures',   f'{len(df0)}')
 
     calibr0  = res_csv['calibration']
     pm_cal0  = calibr0[2] if len(calibr0) > 2 and calibr0[2] != 0 else 0.77
@@ -347,76 +242,223 @@ if res_csv is not None:
     t_min_val = float(t_min.min())
     t_max_val = float(t_min.max())
 
-    # ── Slider de sélection de l'intervalle ──────────────────────────
-    k_slider = f'intervalle_{phase}'
-    if k_slider not in st.session_state:
-        st.session_state[k_slider] = (t_min_val, t_max_val)
+    # Initialiser les intervalles des 3 phases (découpage par tiers)
+    duree_tot_min = t_max_val - t_min_val
+    tiers = [
+        (t_min_val,
+         round(t_min_val + duree_tot_min * 0.37, 1)),
+        (round(t_min_val + duree_tot_min * 0.37, 1),
+         round(t_min_val + duree_tot_min * 0.69, 1)),
+        (round(t_min_val + duree_tot_min * 0.69, 1),
+         t_max_val),
+    ]
+    for idx_p, p in enumerate(['HP', 'MP', 'BP']):
+        if f'intervalle_{p}' not in st.session_state:
+            st.session_state[f'intervalle_{p}'] = tiers[idx_p]
 
-    st.markdown('**⏱️ Sélectionner l\'intervalle de la phase (minutes)**')
-    intervalle = st.slider(
-        'Intervalle',
-        min_value=round(t_min_val, 1),
-        max_value=round(t_max_val, 1),
-        value=st.session_state[k_slider],
-        step=0.5,
-        label_visibility='collapsed',
-        key=k_slider,
-    )
-    t_debut_min, t_fin_min = intervalle
-    st.caption(f'Début : **{t_debut_min:.1f} min**  |  Fin : **{t_fin_min:.1f} min**  |  Durée sélectionnée : **{t_fin_min - t_debut_min:.1f} min**')
-
+    # ── Figure combinée : CO + PM + Température ──────────────────────
     fig = go.Figure()
-    fig.add_trace(go.Scatter(x=t_min, y=df_taux0['CO_ppm_zeroed'],
-                             name='CO (ppm)', line=dict(color='#2196F3', width=1)))
-    fig.add_trace(go.Scatter(x=t_min, y=df_taux0['PM_ug_zeroed'],
-                             name='PM (ug/m3)', line=dict(color='#F44336', width=1),
-                             yaxis='y2'))
-    # Zone sélectionnée en vert transparent
-    fig.add_vrect(
-        x0=t_debut_min, x1=t_fin_min,
-        fillcolor='rgba(0,200,0,0.12)',
-        line=dict(color='green', width=2, dash='dash'),
-        annotation_text=f'Phase sélectionnée ({t_fin_min - t_debut_min:.1f} min)',
-        annotation_position='top left',
-        annotation_font=dict(size=13, color='green'),
-    )
-    # Ligne de début (verte)
-    fig.add_vline(x=t_debut_min, line_color='green',  line_width=3,
-                  annotation_text=f'Début {t_debut_min:.1f} min',
-                  annotation_position='bottom left',
-                  annotation_font=dict(size=12, color='green'))
-    # Ligne de fin (rouge foncé)
-    fig.add_vline(x=t_fin_min,   line_color='darkred', line_width=3,
-                  annotation_text=f'Fin {t_fin_min:.1f} min',
-                  annotation_position='bottom right',
-                  annotation_font=dict(size=12, color='darkred'))
+    fig.add_trace(go.Scatter(
+        x=t_min, y=df_taux0['CO_ppm_zeroed'],
+        name='CO (ppm)', line=dict(color='#2196F3', width=1.2),
+    ))
+    fig.add_trace(go.Scatter(
+        x=t_min, y=df_taux0['PM_ug_zeroed'],
+        name='PM₂.₅ (µg/m³)', line=dict(color='#F44336', width=1.2),
+        yaxis='y2',
+    ))
+    fig.add_trace(go.Scatter(
+        x=t_min, y=df_cal0['GasTemp'],
+        name='Température gaz (°C)', line=dict(color='#FF9800', width=1.5, dash='dot'),
+        yaxis='y3',
+    ))
+
+    for p, s in PHASE_COLORS.items():
+        iv = st.session_state.get(f'intervalle_{p}')
+        if iv:
+            x0, x1 = iv
+            fig.add_vrect(
+                x0=x0, x1=x1,
+                fillcolor=s['fill'],
+                line=dict(color=s['border'], width=2, dash='dash'),
+                annotation_text=f'{p} ({x1 - x0:.1f} min)',
+                annotation_position=s['pos'],
+                annotation_font=dict(size=12, color=s['border']),
+            )
+
     fig.update_layout(
-        xaxis=dict(
-            title='Temps (min)',
-            title_font=dict(size=16, color='black'),
-            tickfont=dict(size=15, color='black'),
-            showgrid=True,
-            gridcolor='#e0e0e0',
-        ),
-        yaxis=dict(
-            title='CO (ppm)',
-            title_font=dict(size=14, color='#2196F3'),
-            tickfont=dict(size=13, color='#2196F3'),
-        ),
-        yaxis2=dict(
-            title='PM (µg/m³)',
-            title_font=dict(size=14, color='#F44336'),
-            tickfont=dict(size=13, color='#F44336'),
-            overlaying='y', side='right',
-        ),
-        legend=dict(orientation='h', y=1.08, font=dict(size=13)),
+        xaxis=dict(title='Temps (min)', title_font=dict(size=15),
+                   tickfont=dict(size=13), showgrid=True, gridcolor='#e0e0e0'),
+        yaxis=dict(title='CO (ppm)',
+                   title_font=dict(size=13, color='#2196F3'),
+                   tickfont=dict(size=12, color='#2196F3')),
+        yaxis2=dict(title='PM₂.₅ (µg/m³)',
+                    title_font=dict(size=13, color='#F44336'),
+                    tickfont=dict(size=12, color='#F44336'),
+                    overlaying='y', side='right'),
+        yaxis3=dict(title='T gaz (°C)',
+                    title_font=dict(size=13, color='#FF9800'),
+                    tickfont=dict(size=12, color='#FF9800'),
+                    overlaying='y', side='right', anchor='free', position=1.0,
+                    showgrid=False),
+        legend=dict(orientation='h', y=1.10, font=dict(size=12)),
         hovermode='x unified', plot_bgcolor='white', paper_bgcolor='white',
-        margin=dict(l=70, r=70, t=40, b=50), height=320,
+        margin=dict(l=70, r=110, t=50, b=50), height=360,
     )
     st.plotly_chart(fig, use_container_width=True)
+
+    # ── Sliders d'intervalle pour les 3 phases ────────────────────────
+    st.markdown('**⏱️ Définir les intervalles de chaque phase (minutes)**')
+    sl_hp, sl_mp, sl_bp = st.columns(3)
+    for col, p, color in zip([sl_hp, sl_mp, sl_bp],
+                              ['HP', 'MP', 'BP'],
+                              ['#1565C0', '#E65100', '#2E7D32']):
+        with col:
+            st.markdown(f'<span style="color:{color};font-weight:600">{p} — {PHASES_LABELS[p]}</span>',
+                        unsafe_allow_html=True)
+            iv = st.slider(
+                f'Intervalle {p}',
+                min_value=round(t_min_val, 1),
+                max_value=round(t_max_val, 1),
+                value=st.session_state[f'intervalle_{p}'],
+                step=0.5,
+                label_visibility='collapsed',
+                key=f'intervalle_{p}',
+            )
+            x0, x1 = iv
+            st.caption(f'{x0:.1f} → {x1:.1f} min  ({x1 - x0:.1f} min)')
+
 else:
-    t_debut_min, t_fin_min = None, None
+    baseline_flow = 9900.0
+    bg_pm_raw, bg_co_raw, bg_co2_ppm = 0.0, 0.0, 615.0
     st.info('👈 Chargez un fichier CSV dans la barre latérale pour commencer.')
+
+st.divider()
+
+# ─────────────────────────────────────────────────────────────────────
+# Saisie des données de test — 3 phases en parallèle
+# ─────────────────────────────────────────────────────────────────────
+
+st.subheader('📝 Données du test par phase')
+st.caption('Saisissez les données des trois phases simultanément, puis analysez.')
+
+col_hp, col_mp, col_bp = st.columns(3)
+
+for col, phase in zip([col_hp, col_mp, col_bp], ['HP', 'MP', 'BP']):
+    td = TEST_DEFAULTS[phase]
+    s  = PHASE_COLORS[phase]
+
+    with col:
+        st.markdown(
+            f'<div style="background:{s["fill"]};border-left:4px solid {s["border"]};'
+            f'padding:6px 10px;border-radius:4px;font-weight:700;font-size:1.05em;">'
+            f'{phase} — {PHASES_LABELS[phase]}</div>',
+            unsafe_allow_html=True,
+        )
+        st.markdown('')
+
+        # ── Données initiales ──────────────────────────────────────
+        st.markdown('**Données initiales**')
+        mb = st.number_input(
+            'Masse combustible (kg)',
+            min_value=0.0,
+            value=float(td['mb'] if mode_test else 1.0),
+            step=0.01, format='%.3f',
+            key=f'mb_{phase}',
+        )
+        k_me = f'me_{phase}'
+        if k_me not in st.session_state:
+            st.session_state[k_me] = float(td['me'] * td['np'] if mode_test else 2.0)
+        st.number_input(
+            'Eau (kg)',
+            min_value=0.1, step=0.1, format='%.1f',
+            key=k_me,
+        )
+        k_t0 = f'td_{phase}'
+        if k_t0 not in st.session_state:
+            st.session_state[k_t0] = float(td['td'] if mode_test else 20.0)
+        st.number_input(
+            'Température initiale eau (°C)',
+            step=0.5, format='%.1f',
+            key=k_t0,
+        )
+
+        st.markdown('**Données finales**')
+        mc = st.number_input(
+            'Masse charbon résiduel (kg)',
+            min_value=0.0,
+            value=float(td['mc'] if mode_test else 0.0),
+            step=0.001, format='%.3f',
+            key=f'mc_{phase}',
+        )
+        k_tf = f'tf_{phase}'
+        if k_tf not in st.session_state:
+            st.session_state[k_tf] = float(td['tf'] if mode_test else 90.0)
+        st.number_input(
+            'Température finale eau (°C)',
+            step=0.5, format='%.1f',
+            key=k_tf,
+        )
+
+        # ── Filtre PM optionnel ────────────────────────────────────
+        with st.expander('⚖️ Filtre PM2.5 (optionnel)'):
+            f1, f2 = st.columns(2)
+            filtre_avant = f1.number_input('Avant (mg)', min_value=0.0,
+                                            value=0.0, step=0.001, format='%.3f',
+                                            key=f'fa_{phase}')
+            filtre_apres = f2.number_input('Après (mg)', min_value=0.0,
+                                            value=0.0, step=0.001, format='%.3f',
+                                            key=f'fp_{phase}')
+
+        st.markdown('')
+
+        # ── Bouton analyser ────────────────────────────────────────
+        analyser_btn = st.button(
+            f'▶  Analyser {phase}',
+            key=f'btn_analyser_{phase}',
+            type='primary',
+            use_container_width=True,
+            disabled=(res_csv is None),
+        )
+
+        if phase in st.session_state.resultats:
+            r_done = st.session_state.resultats[phase]
+            st.success(f'✓ Analysée — {r_done["duree_min"]:.1f} min  |  Tier {r_done["tier"]}')
+
+        if analyser_btn and res_csv is not None:
+            pots = [{
+                'masse_eau': st.session_state[f'me_{phase}'],
+                'T_debut'  : st.session_state[f'td_{phase}'],
+                'T_fin'    : st.session_state[f'tf_{phase}'],
+            }]
+            donnees_ext = {
+                'type_combustible': type_comb,
+                'masse_bois_kg'   : mb,
+                'masse_charbon_kg': mc,
+                'humidite_pct'    : hum_comb,
+                'pots'            : pots,
+                'T_atm'           : T_atm,
+                'p_Pa'            : pression * 100.0,
+                'baseline_flow'   : baseline_flow,
+                'bg_pm_raw'       : bg_pm_raw,
+                'bg_co_raw'       : bg_co_raw,
+                'bg_co2_ppm'      : bg_co2_ppm,
+                'filtre_avant_mg' : filtre_avant,
+                'filtre_apres_mg' : filtre_apres,
+            }
+            _iv = st.session_state.get(f'intervalle_{phase}')
+            if _iv:
+                donnees_ext['t_debut_s'] = _iv[0] * 60.0
+                donnees_ext['t_fin_s']   = _iv[1] * 60.0
+            with st.spinner(f'Calculs {phase}...'):
+                result = analyser(res_csv, donnees_ext)
+            result['_fichier'] = nom_fichier
+            result['_pm_gravi_mg'] = (
+                round(filtre_apres - filtre_avant, 3)
+                if filtre_apres > filtre_avant > 0 else None
+            )
+            st.session_state.resultats[phase] = result
+            st.rerun()
 
 st.divider()
 
@@ -464,8 +506,8 @@ LIGNES_DEF = [
 def tableau_phase(code):
     r = st.session_state.resultats.get(code)
     if r is None:
-        st.info(f'Phase {code} non analysée. '
-                f'Sélectionnez "{code}" → chargez le CSV → cliquez "Analyser la phase {code}".')
+        st.info(f'Phase {code} non encore analysée. '
+                f'Remplissez les données ci-dessus et cliquez "Analyser {code}".')
         return
     fichier = r.get('_fichier', '')
     if fichier:
@@ -523,7 +565,7 @@ with tab_global:
             ('Eff. therm. avec charbon (%)', lambda r: r['thermique']['efficacite_avec_char_pct']),
             ('Puissance cuisson (W)',         lambda r: r['thermique']['puissance_cuis_kW'] * 1000),
             ('Taux de combustion (g/min)',    lambda r: r['thermique']['taux_combustion_g_min']),
-            ('PM2.5 / énergie utile (mg/MJ)',lambda r: r['normalises']['PM_par_utile_mg_MJ']),
+            ('PM2.5 / énergie utile (mg/MJ)', lambda r: r['normalises']['PM_par_utile_mg_MJ']),
             ('CO / énergie utile (g/MJ)',     lambda r: r['normalises']['CO_par_utile_g_MJ']),
             ('CO total (g)',                  lambda r: r['totaux']['CO_total_g']),
             ('CO2 total (g)',                 lambda r: r['totaux']['CO2_total_g']),
