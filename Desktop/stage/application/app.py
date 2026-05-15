@@ -184,16 +184,15 @@ with st.sidebar:
     # ── Paramètres avancés (zérotage capteurs) ────────────────────────
     if res_csv is not None:
         bg_pm_a, bg_co_a, bg_co2_a, bg_fl_a = estimer_fond(res_csv['donnees'])
+        with st.expander('⚙️ Paramètres avancés (zérotage capteurs)'):
+            st.caption('Estimés automatiquement depuis le début du CSV. Modifiables si nécessaire.')
+            bg_pm_raw     = st.number_input('PM ambiant (logunits)',  value=bg_pm_a,  step=0.1, format='%.1f', key='bpm')
+            bg_co_raw     = st.number_input('CO ambiant (logunits)',  value=bg_co_a,  step=0.1, format='%.1f', key='bco')
+            bg_co2_ppm    = st.number_input('CO₂ ambiant (ppm)',      value=bg_co2_a, step=1.0, format='%.1f', key='bco2')
+            baseline_flow = st.number_input('Débit ventilateur arrêté (logunits)',
+                                             value=bg_fl_a, step=10.0, format='%.0f', key='bfl')
     else:
-        bg_pm_a, bg_co_a, bg_co2_a, bg_fl_a = 0.0, 0.0, 615.0, 9900.0
-
-    with st.expander('⚙️ Paramètres avancés (zérotage capteurs)'):
-        st.caption('Estimés automatiquement depuis le début du CSV.')
-        bg_pm_raw     = st.number_input('PM ambiant (logunits)',  value=bg_pm_a,  step=0.1, format='%.1f', key='bpm')
-        bg_co_raw     = st.number_input('CO ambiant (logunits)',  value=bg_co_a,  step=0.1, format='%.1f', key='bco')
-        bg_co2_ppm    = st.number_input('CO₂ ambiant (ppm)',      value=bg_co2_a, step=1.0, format='%.1f', key='bco2')
-        baseline_flow = st.number_input('Débit ventilateur arrêté (logunits)',
-                                         value=bg_fl_a, step=10.0, format='%.0f', key='bfl')
+        bg_pm_raw, bg_co_raw, bg_co2_ppm, baseline_flow = 0.0, 0.0, 615.0, 9900.0
 
     st.divider()
 
