@@ -287,23 +287,37 @@ if res_csv is not None:
             )
 
     fig.update_layout(
-        xaxis=dict(title='Temps (min)', title_font=dict(size=15),
-                   tickfont=dict(size=13), showgrid=True, gridcolor='#e0e0e0'),
-        yaxis=dict(title='CO (ppm)',
-                   title_font=dict(size=13, color='#2196F3'),
-                   tickfont=dict(size=12, color='#2196F3')),
-        yaxis2=dict(title='PM₂.₅ (µg/m³)',
-                    title_font=dict(size=13, color='#F44336'),
-                    tickfont=dict(size=12, color='#F44336'),
-                    overlaying='y', side='right'),
-        yaxis3=dict(title='T gaz (°C)',
-                    title_font=dict(size=13, color='#FF9800'),
-                    tickfont=dict(size=12, color='#FF9800'),
-                    overlaying='y', side='right', anchor='free', position=1.0,
-                    showgrid=False),
+        # Zone de tracé réduite des deux côtés pour laisser de la place aux axes
+        xaxis=dict(
+            domain=[0.08, 0.88],
+            title='Temps (min)', title_font=dict(size=14),
+            tickfont=dict(size=12), showgrid=True, gridcolor='#e0e0e0',
+        ),
+        # Axe gauche : CO (bleu)
+        yaxis=dict(
+            title='CO (ppm)',
+            title_font=dict(size=13, color='#2196F3'),
+            tickfont=dict(size=12, color='#2196F3'),
+        ),
+        # Axe gauche secondaire : Température (orange) — décalé à l'extérieur
+        yaxis3=dict(
+            title='T gaz (°C)',
+            title_font=dict(size=13, color='#FF9800'),
+            tickfont=dict(size=12, color='#FF9800'),
+            overlaying='y', side='left',
+            anchor='free', position=0.0,
+            showgrid=False,
+        ),
+        # Axe droit : PM₂.₅ (rouge) — seul sur la droite, bien lisible
+        yaxis2=dict(
+            title='PM₂.₅ (µg/m³)',
+            title_font=dict(size=13, color='#F44336'),
+            tickfont=dict(size=12, color='#F44336'),
+            overlaying='y', side='right',
+        ),
         legend=dict(orientation='h', y=1.10, font=dict(size=12)),
         hovermode='x unified', plot_bgcolor='white', paper_bgcolor='white',
-        margin=dict(l=70, r=110, t=50, b=50), height=360,
+        margin=dict(l=100, r=90, t=50, b=50), height=370,
     )
     st.plotly_chart(fig, use_container_width=True)
 
@@ -358,9 +372,10 @@ for col, phase in zip([col_hp, col_mp, col_bp], ['HP', 'MP', 'BP']):
         st.markdown('')
 
         # ── Données initiales ──────────────────────────────────────
-        st.markdown('**Données initiales**')
+        st.markdown('**Pesées et températures initiales**')
         mb = st.number_input(
-            'Masse combustible (kg)',
+            'Bois chargé dans le foyer (kg)',
+            help='Masse de bois pesée AVANT la phase et mise dans le foyer.',
             min_value=0.0,
             value=float(td['mb'] if mode_test else 1.0),
             step=0.01, format='%.3f',
@@ -370,7 +385,8 @@ for col, phase in zip([col_hp, col_mp, col_bp], ['HP', 'MP', 'BP']):
         if k_me not in st.session_state:
             st.session_state[k_me] = float(td['me'] * td['np'] if mode_test else 2.0)
         st.number_input(
-            'Eau (kg)',
+            'Eau totale dans les pots (kg)',
+            help='Masse totale d\'eau mise dans tous les pots au début de la phase.',
             min_value=0.1, step=0.1, format='%.1f',
             key=k_me,
         )
@@ -378,14 +394,17 @@ for col, phase in zip([col_hp, col_mp, col_bp], ['HP', 'MP', 'BP']):
         if k_t0 not in st.session_state:
             st.session_state[k_t0] = float(td['td'] if mode_test else 20.0)
         st.number_input(
-            'Température initiale eau (°C)',
+            'T° eau initiale (°C)',
+            help='Température de l\'eau mesurée au DÉBUT de la phase.',
             step=0.5, format='%.1f',
             key=k_t0,
         )
 
-        st.markdown('**Données finales**')
+        st.markdown('**Pesées et températures finales**')
         mc = st.number_input(
-            'Masse charbon résiduel (kg)',
+            'Charbon résiduel dans le foyer (kg)',
+            help='Masse de charbon restant dans le foyer à la FIN de la phase. '
+                 'Le combustible brûlé = bois chargé − charbon résiduel (calculé automatiquement).',
             min_value=0.0,
             value=float(td['mc'] if mode_test else 0.0),
             step=0.001, format='%.3f',
@@ -395,10 +414,17 @@ for col, phase in zip([col_hp, col_mp, col_bp], ['HP', 'MP', 'BP']):
         if k_tf not in st.session_state:
             st.session_state[k_tf] = float(td['tf'] if mode_test else 90.0)
         st.number_input(
-            'Température finale eau (°C)',
+            'T° eau finale (°C)',
+            help='Température de l\'eau mesurée à la FIN de la phase.',
             step=0.5, format='%.1f',
             key=k_tf,
         )
+
+        # Afficher le combustible brûlé calculé
+        mb_val = st.session_state.get(f'mb_{phase}', 0.0)
+        mc_val = st.session_state.get(f'mc_{phase}', 0.0)
+        brule  = max(0.0, mb_val - mc_val)
+        st.caption(f'→ Combustible brûlé estimé : **{brule:.3f} kg** (bois chargé − charbon résiduel)')
 
         # ── Filtre PM optionnel ────────────────────────────────────
         with st.expander('⚖️ Filtre PM2.5 (optionnel)'):
