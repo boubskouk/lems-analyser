@@ -49,6 +49,13 @@ if 'prev_mode_test' not in st.session_state:
 # Helpers
 # ─────────────────────────────────────────────────────────────────────
 
+def _adj(key, delta, min_val=None):
+    val = round(st.session_state[key] + delta, 1)
+    if min_val is not None:
+        val = max(min_val, val)
+    st.session_state[key] = val
+
+
 def lire_upload(fichier):
     contenu = fichier.read().decode('utf-8', errors='replace')
     with tempfile.NamedTemporaryFile(mode='w', suffix='.csv', delete=False,
@@ -221,25 +228,25 @@ with st.sidebar:
 
         st.caption(f'Pot {j + 1}')
         ca, cb, cc = st.columns([1, 4, 1])
-        if ca.button('−', key=f'me_m_{phase}_{j}', use_container_width=True):
-            st.session_state[k_me] = max(0.1, round(st.session_state[k_me] - 0.1, 1))
+        ca.button('−', key=f'me_m_{phase}_{j}', use_container_width=True,
+                  on_click=_adj, args=(k_me, -0.1), kwargs={'min_val': 0.1})
         cb.number_input('Eau (kg)', step=0.1, format='%.1f', min_value=0.1, key=k_me)
-        if cc.button('+', key=f'me_p_{phase}_{j}', use_container_width=True):
-            st.session_state[k_me] = round(st.session_state[k_me] + 0.1, 1)
+        cc.button('+', key=f'me_p_{phase}_{j}', use_container_width=True,
+                  on_click=_adj, args=(k_me, 0.1))
 
         ca, cb, cc = st.columns([1, 4, 1])
-        if ca.button('−', key=f'td_m_{phase}_{j}', use_container_width=True):
-            st.session_state[k_t0] = round(st.session_state[k_t0] - 1.0, 1)
+        ca.button('−', key=f'td_m_{phase}_{j}', use_container_width=True,
+                  on_click=_adj, args=(k_t0, -1.0))
         cb.number_input('T début (°C)', step=1.0, format='%.1f', key=k_t0)
-        if cc.button('+', key=f'td_p_{phase}_{j}', use_container_width=True):
-            st.session_state[k_t0] = round(st.session_state[k_t0] + 1.0, 1)
+        cc.button('+', key=f'td_p_{phase}_{j}', use_container_width=True,
+                  on_click=_adj, args=(k_t0, 1.0))
 
         ca, cb, cc = st.columns([1, 4, 1])
-        if ca.button('−', key=f'tf_m_{phase}_{j}', use_container_width=True):
-            st.session_state[k_tf] = round(st.session_state[k_tf] - 1.0, 1)
+        ca.button('−', key=f'tf_m_{phase}_{j}', use_container_width=True,
+                  on_click=_adj, args=(k_tf, -1.0))
         cb.number_input('T fin (°C)', step=1.0, format='%.1f', key=k_tf)
-        if cc.button('+', key=f'tf_p_{phase}_{j}', use_container_width=True):
-            st.session_state[k_tf] = round(st.session_state[k_tf] + 1.0, 1)
+        cc.button('+', key=f'tf_p_{phase}_{j}', use_container_width=True,
+                  on_click=_adj, args=(k_tf, 1.0))
 
         pots.append({
             'masse_eau': st.session_state[k_me],
