@@ -26,7 +26,7 @@ st.title('🔥 LEMS Analyser — Analyse des émissions de foyers biomasse')
 st.caption('Conforme ISO 19867-1 · Classement ISO/IWA-11 · CERER / ESP-UCAD')
 st.warning('⚠️ Version bêta — résultats en cours de validation. Ne pas utiliser pour des rapports officiels.')
 
-CSV_TEST       = os.path.join(os.path.dirname(__file__), 'csv', 'T1_foyer_kevin.csv')
+CSV_TEST       = os.path.join(os.path.dirname(__file__), 'csv', '01-12-2022-Sakkanal-T11.csv')
 DOSSIER_DEFAUT = r'C:\Emissions-Output'
 
 PHASES_LABELS = {'HP': 'Haute Puissance', 'MP': 'Moyenne Puissance', 'BP': 'Basse Puissance'}
@@ -37,9 +37,9 @@ PHASE_COLORS  = {
 }
 
 TEST_DEFAULTS = {
-    'HP': dict(mb=1.820, mc=0.062, np=4, me=2.5, td=21.0, tf=91.5, hmc=4.41),
-    'MP': dict(mb=0.900, mc=0.030, np=4, me=2.5, td=21.0, tf=91.5, hmc=4.41),
-    'BP': dict(mb=0.400, mc=0.010, np=4, me=2.5, td=21.0, tf=91.5, hmc=4.41),
+    'HP': dict(mb=1.820, mc=0.062, np=4, me=2.5, td=22.0, tf=95.0, hmc=12.0),
+    'MP': dict(mb=0.900, mc=0.030, np=4, me=2.5, td=22.0, tf=95.0, hmc=12.0),
+    'BP': dict(mb=0.400, mc=0.010, np=4, me=2.5, td=22.0, tf=95.0, hmc=12.0),
 }
 
 # ─────────────────────────────────────────────────────────────────────
@@ -99,7 +99,7 @@ def estimer_fond(df_full):
 # ─────────────────────────────────────────────────────────────────────
 
 with st.sidebar:
-    mode_test = st.toggle('🧪 Mode test (T1 — Foyer Kevin)', value=False)
+    mode_test = st.toggle('🧪 Mode test (Sakkanal-T11, 01-12-2022)', value=False)
 
     if mode_test != st.session_state.prev_mode_test:
         st.session_state.prev_mode_test = mode_test
@@ -124,7 +124,7 @@ with st.sidebar:
         if _CSV not in st.session_state:
             try:
                 st.session_state[_CSV]  = lire_csv(CSV_TEST)
-                st.session_state[_NAME] = 'T1_foyer_kevin.csv'
+                st.session_state[_NAME] = '01-12-2022-Sakkanal-T11.csv'
             except Exception as e:
                 st.error(f'Fichier test introuvable : {e}')
         st.info(f'Fichier chargé : {st.session_state.get(_NAME, "")}')
