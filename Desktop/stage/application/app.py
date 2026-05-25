@@ -5,7 +5,7 @@ LEMS Analyser — Application Streamlit
 Conforme ISO 19867-1 · Classement ISO/IWA-11
 """
 
-import io, os, tempfile
+import io, os, tempfile, datetime
 import numpy as np
 import pandas as pd
 import streamlit as st
@@ -14,6 +14,10 @@ import plotly.graph_objects as go
 from import_csv import lire_csv
 from calculs import (analyser, COMBUSTIBLES, LABEL_TIER,
                      appliquer_calibration, calculer_taux_emission)
+from visualisation import graphique_comparaison_calibration, tableau_calibration_df
+from interpretation import (analyser_phase, graphique_jauges_emissions,
+                             generer_texte, generer_recommandations, generer_pdf,
+                             TIER_COUL, TIER_BG, TIER_LABEL, TIER_EMOJI)
 
 # ─────────────────────────────────────────────────────────────────────
 st.set_page_config(
@@ -49,6 +53,8 @@ if 'resultats' not in st.session_state:
     st.session_state.resultats = {}
 if 'prev_mode_test' not in st.session_state:
     st.session_state.prev_mode_test = False
+if 'tests_accumules' not in st.session_state:
+    st.session_state.tests_accumules = []  # liste de tests complets (HP+MP+BP) pour stats ISO
 
 # ─────────────────────────────────────────────────────────────────────
 # Helpers
@@ -114,8 +120,16 @@ with st.sidebar:
 
     st.divider()
 
+    # ── Avancement tests ISO 19867 ────────────────────────────────────
+    _n_acc_sb = len(st.session_state.tests_accumules)
+    _test_sb  = min(_n_acc_sb + 1, 3)
+    if _n_acc_sb < 3:
+        st.info(f'**Test {_test_sb} / 3**  \nISO 19867 — 3 repetitions minimum')
+    else:
+        st.success('**3 tests complets**')
+
     # ── Source CSV ────────────────────────────────────────────────────
-    st.header('📂 Fichier CSV')
+    st.header('📂 Étape 1 — Fichier CSV')
 
     _CSV  = 'current_csv'
     _NAME = 'current_csv_name'
@@ -166,7 +180,7 @@ with st.sidebar:
     st.divider()
 
     # ── Données communes (saisies une seule fois) ─────────────────────
-    st.header('📋 Données communes')
+    st.header('📋 Étape 2 — Données communes')
     st.caption('Ces paramètres s\'appliquent aux trois phases.')
 
     td0 = TEST_DEFAULTS['HP']
@@ -179,6 +193,10 @@ with st.sidebar:
                                 step=0.5, format='%.1f', key='ta')
     pression = st.number_input('Pression atmosphérique (hPa)', value=1012.0,
                                 step=1.0, format='%.1f', key='pr')
+    hum_labo = st.number_input('Humidité du laboratoire (%)', min_value=0.0, max_value=100.0,
+                                value=50.0, step=1.0, format='%.1f', key='hum_labo')
+    nom_testeur = st.text_input('Nom du testeur(s)', value='', key='nom_testeur',
+                                 placeholder='ex. A. Fall, M. Diallo')
 
 
     # ── Paramètres avancés (zérotage capteurs) ────────────────────────
@@ -210,6 +228,87 @@ with st.sidebar:
             st.session_state.resultats = {}
             st.rerun()
 
+
+# ─────────────────────────────────────────────────────────────────────
+# Guidage utilisateur — Bastien & Scapin : Guidage / Incitation / Feedback
+# ─────────────────────────────────────────────────────────────────────
+_n_acc = len(st.session_state.tests_accumules)
+_n_res = len([r for r in st.session_state.resultats.values() if r])
+
+_ETAPES_LBL = [
+    '📂 1. Charger CSV',
+    '⏱️ 2. Intervalles',
+    '📝 3. Saisir données',
+    '▶ 4. Analyser',
+    '💾 5. Enregistrer',
+]
+
+if _n_acc >= 3:
+    st.success(
+        '🎉 **3 tests enregistrés !**  '
+        'Consultez les **statistiques ISO 19867** dans l\'onglet **📊 Rapport global** ci-dessous.'
+    )
+else:
+    _test_n = _n_acc + 1
+    if not res_csv:
+        _ei  = 0
+        _msg = (f'👈 **Test {_test_n}/3 — Étape 1 :** Chargez le fichier CSV du test '
+                f'dans la **barre latérale à gauche**.')
+        _msg_type = 'warning'
+    elif _n_res == 0:
+        _ei  = 1
+        _msg = (f'⬇️ **Test {_test_n}/3 — Étape 2 :** CSV chargé ✅  '
+                f'Ajustez les **intervalles HP / MP / BP** sur le graphe avec les sliders, '
+                f'puis descendez pour saisir les données de pesée.')
+        _msg_type = 'info'
+    elif 0 < _n_res < 3:
+        _ei  = 3
+        _msg = (f'⬇️ **Test {_test_n}/3 — Étape 3 :** {_n_res}/3 phases analysées.  '
+                f'Analysez les phases restantes ou cliquez **"▶▶ Analyser les 3 phases"**.')
+        _msg_type = 'info'
+    else:
+        _ei  = 4
+        _msg = (f'➡️ **Test {_test_n}/3 — Étape 4 :** ✅ 3 phases analysées !  '
+                f'Descendez jusqu\'à l\'onglet **📊 Rapport global** et cliquez '
+                f'**"➕ Enregistrer ce test"** pour valider ce test.')
+        _msg_type = 'success'
+
+    # Stepper natif : étiquettes avec préfixe visuel selon l'état
+    _step_cols = st.columns(5)
+    for _si, (_sc, _slbl) in enumerate(zip(_step_cols, _ETAPES_LBL)):
+        if _si < _ei:
+            _sc.success(f'~~{_slbl}~~')   # fait = vert barré
+        elif _si == _ei:
+            _sc.info(f'**{_slbl}**')       # en cours = bleu gras
+        else:
+            _sc.caption(_slbl)             # à venir = gris discret
+
+    if _msg_type == 'warning':
+        st.warning(_msg)
+    elif _msg_type == 'success':
+        st.success(_msg)
+    else:
+        st.info(_msg)
+
+st.markdown('')
+
+# ─────────────────────────────────────────────────────────────────────
+# Identification du test
+# ─────────────────────────────────────────────────────────────────────
+with st.expander('🏷️ Identification du test', expanded=False):
+    col_id1, col_id2, col_id3 = st.columns(3)
+    with col_id1:
+        st.text_input('Nom du fourneau / poêle', value='', key='nom_fourneau',
+                       placeholder='ex. Sakkanal-T11')
+        st.number_input('N° de réplique', min_value=1, max_value=20, value=1, step=1, key='n_replique')
+    with col_id2:
+        st.text_input('Lieu du test', value='', key='lieu_test',
+                       placeholder='ex. CERER, Dakar')
+        st.text_input('Date du test (JJ/MM/AAAA)', value='', key='date_test',
+                       placeholder='ex. 01/12/2022')
+    with col_id3:
+        st.text_area('Remarques / observations', value='', key='remarques', height=105,
+                      placeholder='ex. Vent modéré, allumage au papier, foyer propre...')
 
 # ─────────────────────────────────────────────────────────────────────
 # Zone principale — Graphe CSV
@@ -341,6 +440,97 @@ if res_csv is not None:
             x0, x1 = iv
             st.caption(f'{x0:.1f} → {x1:.1f} min  ({x1 - x0:.1f} min)')
 
+    # ── Comparaison brutes / calibrées ────────────────────────────
+    with st.expander('🔬 Calibration — données brutes vs calibrées', expanded=False):
+
+        st.markdown('### Pourquoi calibrer ?')
+        st.markdown(
+            'Les capteurs du LEMS ne mesurent pas directement des ppm ou des µg/m³. '
+            'Ils produisent un **signal électrique brut** converti en **log-units** — '
+            'un nombre interne sans signification physique (ex : 8 500).  \n\n'
+            'La calibration convertit ce nombre en **unité réelle** grâce à un facteur '
+            'propre à chaque capteur :  \n\n'
+            '> **Signal brut (log-units) × facteur = Valeur physique (ppm, µg/m³, °C…)**  \n\n'
+            'Exemple : `8 500 × 0.00148 = 12.6 ppm de CO`  \n\n'
+            'Ces facteurs sont stockés dans la **ligne `#0` du fichier CSV** '
+            '(première ligne, 8 valeurs correspondant aux 8 capteurs).  \n\n'
+            '⚠️ **Sans calibration valide, tous les calculs d\'émissions (CO, PM₂.₅) '
+            'et le classement Tier IWA-11 sont incorrects.**'
+        )
+
+        st.markdown('### Facteurs de calibration appliqués')
+        st.caption('Valeurs lues depuis la ligne #0 du CSV · valeur calibrée = valeur brute × facteur')
+        st.dataframe(
+            tableau_calibration_df(df0, df_cal0, calibr0),
+            use_container_width=True,
+        )
+
+        st.markdown('### Vérification graphique')
+        st.info(
+            '**Comment lire :** chaque ligne = un capteur. '
+            '**Colonne gauche** = signal brut (log-units, gris). '
+            '**Colonne droite** = valeur calibrée (ppm / µg/m³ / °C, colorée).  \n\n'
+            '**Règle :** les deux courbes doivent avoir **la même forme** '
+            '(mêmes pics et creux au même moment) — la calibration ne fait que changer '
+            'l\'échelle, pas la forme.  \n'
+            'Si c\'est le cas → ✅ calibration fiable.  \n'
+            'Si les formes divergent → ⚠️ le facteur de ce capteur est à vérifier.  \n'
+            'Le verdict ✅ / ⚠️ est calculé automatiquement et affiché dans chaque titre.'
+        )
+        st.plotly_chart(
+            graphique_comparaison_calibration(df0, df_cal0, calibr0),
+            use_container_width=True,
+        )
+
+    # ── Contrôles de Fuite & Étalonnage ──────────────────────────────
+    with st.expander('🔧 Contrôles de Fuite & Étalonnage', expanded=False):
+        st.caption(
+            'Remplir **avant** de démarrer le test. '
+            'Valeurs de référence typiques : gravimétrique −14 in Hg, capteur gaz −64 in H₂O, Δt = 1/1 min.'
+        )
+
+        col_fuite1, col_fuite2 = st.columns(2)
+
+        with col_fuite1:
+            st.markdown('**Gravimétrique (in Hg)**')
+            c_g1, c_g2 = st.columns(2)
+            c_g1.number_input('Pi (in Hg)', value=-14.0, step=0.5, format='%.1f', key='gravi_pi')
+            c_g2.number_input('Pf (in Hg)', value=-14.0, step=0.5, format='%.1f', key='gravi_pf')
+
+            st.markdown('**Capteur de gaz (in H₂O)**')
+            c_gz1, c_gz2 = st.columns(2)
+            c_gz1.number_input('Pi (in H₂O)', value=-64.0, step=0.5, format='%.1f', key='gaz_pi')
+            c_gz2.number_input('Pf (in H₂O)', value=-64.0, step=0.5, format='%.1f', key='gaz_pf')
+
+            st.markdown('**Δt (min)**')
+            c_dt1, c_dt2 = st.columns(2)
+            c_dt1.number_input('Δt début', value=1.0, step=0.5, format='%.1f', key='dt_debut')
+            c_dt2.number_input('Δt fin',   value=1.0, step=0.5, format='%.1f', key='dt_fin')
+
+            st.markdown('**LRS (kg)**')
+            c_lrs1, c_lrs2 = st.columns(2)
+            c_lrs1.number_input('LRS début (kg)', value=0.0, step=0.001, format='%.3f', key='lrs_debut')
+            c_lrs2.number_input('LRS fin (kg)',   value=0.0, step=0.001, format='%.3f', key='lrs_fin')
+
+        with col_fuite2:
+            st.markdown('**Étalonnage CO₂**')
+            c_e1, c_e2, c_e3 = st.columns(3)
+            c_e1.number_input('Zéro CO₂',         value=0.0,   step=0.01, format='%.2f', key='etal_co2_zero')
+            c_e2.number_input('Pente CO₂ (%)',     value=100.0, step=0.1,  format='%.1f', key='etal_co2_pente')
+            c_e3.number_input('Dérive CO₂',        value=0.0,   step=0.01, format='%.2f', key='etal_co2_derive')
+
+            st.markdown('**Étalonnage CO**')
+            c_f1, c_f2, c_f3 = st.columns(3)
+            c_f1.number_input('Zéro CO',           value=0.0,   step=0.01, format='%.2f', key='etal_co_zero')
+            c_f2.number_input('Pente CO (%)',       value=100.0, step=0.1,  format='%.1f', key='etal_co_pente')
+            c_f3.number_input('Dérive CO',          value=0.0,   step=0.01, format='%.2f', key='etal_co_derive')
+
+            st.markdown('**Étalonnage PM₂.₅**')
+            c_pm1, c_pm2, c_pm3 = st.columns(3)
+            c_pm1.number_input('Zéro PM',          value=0.0,   step=0.01, format='%.2f', key='etal_pm_zero')
+            c_pm2.number_input('Pente PM (%)',      value=100.0, step=0.1,  format='%.1f', key='etal_pm_pente')
+            c_pm3.number_input('Dérive PM',         value=0.0,   step=0.01, format='%.2f', key='etal_pm_derive')
+
 else:
     baseline_flow = 9900.0
     bg_pm_raw, bg_co_raw, bg_co2_ppm = 0.0, 0.0, 615.0
@@ -369,6 +559,12 @@ for col, phase in zip([col_hp, col_mp, col_bp], ['HP', 'MP', 'BP']):
             unsafe_allow_html=True,
         )
         st.markdown('')
+
+        # ── Horodatage terrain ─────────────────────────────────────
+        st.markdown('**Horodatage terrain**')
+        h_col1, h_col2 = st.columns(2)
+        h_col1.time_input('Heure début', value=datetime.time(8, 0),  key=f'h_debut_{phase}')
+        h_col2.time_input('Heure fin',   value=datetime.time(9, 0),  key=f'h_fin_{phase}')
 
         # ── Données initiales ──────────────────────────────────────
         st.markdown('**Pesées et températures initiales**')
@@ -424,6 +620,23 @@ for col, phase in zip([col_hp, col_mp, col_bp], ['HP', 'MP', 'BP']):
         mc_val = st.session_state.get(f'mc_{phase}', 0.0)
         brule  = max(0.0, mb_val - mc_val)
         st.caption(f'→ Combustible brûlé estimé : **{brule:.3f} kg** (bois chargé − charbon résiduel)')
+
+        # ── Données par pot (optionnel) ────────────────────────────
+        with st.expander('🪣 Données par pot (optionnel)'):
+            n_pots_val = st.number_input(
+                'Nombre de pots', min_value=1, max_value=6,
+                value=4, step=1, key=f'npots_{phase}',
+            )
+            n_pots_int = int(n_pots_val)
+            for _ip in range(1, n_pots_int + 1):
+                st.caption(f'Pot {_ip}')
+                _pa, _pb = st.columns(2)
+                _pa.number_input(f'Poids vide P{_ip} (kg)',    min_value=0.0, value=1.0,  step=0.001, format='%.3f', key=f'pot_{phase}_{_ip}_vide')
+                _pb.number_input(f'P{_ip}+eau début (kg)',     min_value=0.0, value=3.5,  step=0.001, format='%.3f', key=f'pot_{phase}_{_ip}_eau_debut')
+                _pc, _pd = st.columns(2)
+                _pc.number_input(f'T° eau début P{_ip} (°C)', value=20.0, step=0.5, format='%.1f', key=f'pot_{phase}_{_ip}_td')
+                _pd.number_input(f'P{_ip}+eau fin (kg)',       min_value=0.0, value=3.2,  step=0.001, format='%.3f', key=f'pot_{phase}_{_ip}_eau_fin')
+                st.number_input(f'T° eau fin P{_ip} (°C)',    value=95.0, step=0.5, format='%.1f', key=f'pot_{phase}_{_ip}_tf')
 
         # ── Filtre PM optionnel ────────────────────────────────────
         with st.expander('⚖️ Filtre PM2.5 (optionnel)'):
@@ -484,6 +697,62 @@ for col, phase in zip([col_hp, col_mp, col_bp], ['HP', 'MP', 'BP']):
             )
             st.session_state.resultats[phase] = result
             st.rerun()
+
+# ── Bouton global : analyser les 3 phases d'un coup ──────────────────
+st.markdown('')
+phases_saisies = all(
+    f'mb_{p}' in st.session_state and f'mc_{p}' in st.session_state
+    and f'me_{p}' in st.session_state and f'td_{p}' in st.session_state
+    and f'tf_{p}' in st.session_state
+    for p in ['HP', 'MP', 'BP']
+)
+col_g1, col_g2, col_g3 = st.columns([1, 2, 1])
+with col_g2:
+    analyser_tout = st.button(
+        '▶▶  Analyser les 3 phases en une fois (HP + MP + BP)',
+        key='btn_analyser_tout',
+        type='primary',
+        use_container_width=True,
+        disabled=(res_csv is None or not phases_saisies),
+        help='Lance l\'analyse des 3 phases simultanément sans passer par les boutons individuels.',
+    )
+
+if analyser_tout and res_csv is not None:
+    with st.spinner('Calculs HP + MP + BP en cours…'):
+        for _p in ['HP', 'MP', 'BP']:
+            _pots = [{
+                'masse_eau': st.session_state[f'me_{_p}'],
+                'T_debut'  : st.session_state[f'td_{_p}'],
+                'T_fin'    : st.session_state[f'tf_{_p}'],
+            }]
+            _fa = st.session_state.get(f'fa_{_p}', 0.0)
+            _fp = st.session_state.get(f'fp_{_p}', 0.0)
+            _donnees = {
+                'type_combustible': type_comb,
+                'masse_bois_kg'   : st.session_state[f'mb_{_p}'],
+                'masse_charbon_kg': st.session_state[f'mc_{_p}'],
+                'humidite_pct'    : hum_comb,
+                'pots'            : _pots,
+                'T_atm'           : T_atm,
+                'p_Pa'            : pression * 100.0,
+                'baseline_flow'   : baseline_flow,
+                'bg_pm_raw'       : bg_pm_raw,
+                'bg_co_raw'       : bg_co_raw,
+                'bg_co2_ppm'      : bg_co2_ppm,
+                'filtre_avant_mg' : _fa,
+                'filtre_apres_mg' : _fp,
+            }
+            _iv = st.session_state.get(f'intervalle_{_p}')
+            if _iv:
+                _donnees['t_debut_s'] = _iv[0] * 60.0
+                _donnees['t_fin_s']   = _iv[1] * 60.0
+            _res = analyser(res_csv, _donnees)
+            _res['_fichier'] = nom_fichier
+            _res['_pm_gravi_mg'] = (
+                round(_fp - _fa, 3) if _fp > _fa > 0 else None
+            )
+            st.session_state.resultats[_p] = _res
+    st.rerun()
 
 st.divider()
 
@@ -556,12 +825,25 @@ def tableau_phase(code):
     st.info(f'**Tier phase {code} : Tier {tier} — {LABEL_TIER[tier]}**')
 
 
+# ── Bannière CTA : guider vers "Rapport global" quand les 3 phases sont prêtes ──
+if len(st.session_state.resultats) == 3 and len(st.session_state.tests_accumules) < 3:
+    st.success(
+        '**Les 3 phases sont analysees !**  \n'
+        'Cliquez sur l\'onglet **Rapport global** ci-dessous, '
+        'puis sur **"Enregistrer ce test"** pour valider.'
+    )
+
 st.subheader('📋 Résultats par phase')
+_n_acc_tabs = len(st.session_state.tests_accumules)
+_global_label = (
+    '📊 Rapport global ✅' if len(st.session_state.resultats) == 3
+    else '📊 Rapport global'
+)
 tab_hp, tab_mp, tab_bp, tab_global = st.tabs([
     '🔴 Haute Puissance (HP)',
     '🟡 Moyenne Puissance (MP)',
     '🔵 Basse Puissance (BP)',
-    '📊 Rapport global',
+    _global_label,
 ])
 
 with tab_hp:
@@ -574,88 +856,220 @@ with tab_bp:
     tableau_phase('BP')
 
 # ─────────────────────────────────────────────────────────────────────
-# Rapport global
+# Rapport global — Interprétation professionnelle ISO 19867-1 / IWA-11
 # ─────────────────────────────────────────────────────────────────────
 
 with tab_global:
     phases_ok = {c: r for c, r in st.session_state.resultats.items() if r is not None}
 
     if not phases_ok:
-        st.info('Analysez au moins une phase pour voir le rapport global.')
+        st.info('Analysez au moins une phase (HP, MP ou BP) pour générer le rapport.')
     else:
-        st.caption(f'{len(phases_ok)}/3 phases analysées')
+        # ── Analyse détaillée de chaque phase ────────────────────────
+        analyses = {code: analyser_phase(code, r) for code, r in phases_ok.items()}
+        tier_global = min(a['t_iwa11'] for a in analyses.values())
+        bg  = TIER_BG.get(tier_global, '#F5F5F5')
+        col = TIER_COUL.get(tier_global, '#555')
 
-        metriques_recap = [
-            ('Eff. therm. sans charbon (%)', lambda r: r['thermique']['efficacite_sans_char_pct']),
-            ('Eff. therm. avec charbon (%)', lambda r: r['thermique']['efficacite_avec_char_pct']),
-            ('Puissance cuisson (W)',         lambda r: r['thermique']['puissance_cuis_kW'] * 1000),
-            ('Taux de combustion (g/min)',    lambda r: r['thermique']['taux_combustion_g_min']),
-            ('PM2.5 / énergie utile (mg/MJ)', lambda r: r['normalises']['PM_par_utile_mg_MJ']),
-            ('CO / énergie utile (g/MJ)',     lambda r: r['normalises']['CO_par_utile_g_MJ']),
-            ('CO total (g)',                  lambda r: r['totaux']['CO_total_g']),
-            ('CO2 total (g)',                 lambda r: r['totaux']['CO2_total_g']),
-            ('MCE (%)',                        lambda r: r['stats']['MCE_pct']),
-            ('Tier IWA-11',                   lambda r: r['tier']),
-        ]
-
-        recap_rows = []
-        for label, fn in metriques_recap:
-            row = {'Métrique': label}
-            for code in ['HP', 'MP', 'BP']:
-                r = phases_ok.get(code)
-                if r:
-                    try:
-                        v = fn(r)
-                        row[code] = f'{v:.4g}' if isinstance(v, float) else str(v)
-                    except Exception:
-                        row[code] = ''
-                else:
-                    row[code] = '—'
-            recap_rows.append(row)
-
-        df_recap = pd.DataFrame(recap_rows).set_index('Métrique')
-        st.dataframe(df_recap, use_container_width=True)
-
-        tier_global = min(r['tier'] for r in phases_ok.values())
-        st.success(f'**Tier global du foyer : Tier {tier_global} — {LABEL_TIER[tier_global]}**')
-
-        # ── Export Excel ──────────────────────────────────────────────
-        st.divider()
-        buffer = io.BytesIO()
-        with pd.ExcelWriter(buffer, engine='openpyxl') as writer:
-            for code in ['HP', 'MP', 'BP']:
-                r = phases_ok.get(code)
-                if not r:
-                    continue
-                ligne = {
-                    'Fichier CSV'             : r.get('_fichier', ''),
-                    'Durée (min)'             : r['duree_min'],
-                    'Masse comb. sec (g)'     : r['thermique']['bois_brule_sec_kg'] * 1000,
-                    'Eff. sans charbon (%)'   : r['thermique']['efficacite_sans_char_pct'],
-                    'Eff. avec charbon (%)'   : r['thermique']['efficacite_avec_char_pct'],
-                    'Taux combustion (g/min)' : r['thermique']['taux_combustion_g_min'],
-                    'Puissance feu (W)'       : r['thermique']['puissance_feu_kW'] * 1000,
-                    'Puissance cuisson (W)'   : r['thermique']['puissance_cuis_kW'] * 1000,
-                    'MCE (%)'                 : r['stats']['MCE_pct'],
-                    'CO total (g)'            : r['totaux']['CO_total_g'],
-                    'CO / masse (g/kg)'       : r['normalises']['CO_par_masse_g_kg'],
-                    'CO / énergie (g/MJ)'     : r['normalises']['CO_par_energie_g_MJ'],
-                    'CO / utile (g/MJ)'       : r['normalises']['CO_par_utile_g_MJ'],
-                    'CO / temps (g/min)'      : r['normalises']['CO_par_temps_g_min'],
-                    'PM2.5 total (mg)'        : r['totaux']['PM_total_mg'],
-                    'PM2.5 / masse (mg/kg)'   : r['normalises']['PM_par_masse_mg_kg'],
-                    'PM2.5 / énergie (mg/MJ)' : r['normalises']['PM_par_energie_mg_MJ'],
-                    'PM2.5 / utile (mg/MJ)'   : r['normalises']['PM_par_utile_mg_MJ'],
-                    'PM2.5 / temps (mg/min)'  : r['normalises']['PM_par_temps_mg_min'],
-                    'CO2 total (g)'           : r['totaux']['CO2_total_g'],
-                    'Débit tunnel (m3/min)'   : r['stats']['debit_moy_m3_min'],
-                    'Tier IWA-11'             : r['tier'],
-                }
-                pd.DataFrame([ligne]).to_excel(writer, sheet_name=code, index=False)
-
-        st.download_button(
-            label='📥 Télécharger rapport Excel',
-            data=buffer.getvalue(),
-            file_name='rapport_LEMS_WBT.xlsx',
-            mime='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+        # ── Bandeau Tier global ───────────────────────────────────────
+        st.markdown(
+            f'<div style="background:{bg};border-left:6px solid {col};'
+            f'padding:14px 20px;border-radius:6px;margin-bottom:12px;">'
+            f'<span style="font-size:1.5em;font-weight:700;color:{col};">'
+            f'{TIER_EMOJI[tier_global]} Tier {tier_global} — {TIER_LABEL[tier_global]}</span><br>'
+            f'<span style="color:#555;font-size:0.95em;">'
+            f'{len(analyses)}/3 phases analysées · Classement IWA-11 = phase la plus défavorable'
+            f'</span></div>',
+            unsafe_allow_html=True,
         )
+
+        # ── Compteur multi-tests ISO 19867 ───────────────────────────
+        n_tests = len(st.session_state.tests_accumules)
+        if len(phases_ok) == 3:
+            col_cpt, col_btn = st.columns([3, 1])
+            with col_cpt:
+                if n_tests == 0:
+                    st.warning(
+                        f'🧪 **0 test enregistré pour ce fourneau** — '
+                        f'il en faut **3 minimum** pour les statistiques ISO 19867 '
+                        f'(moyenne, écart-type, IC 90%).'
+                    )
+                elif n_tests < 3:
+                    st.warning(
+                        f'🧪 **{n_tests} test(s) enregistré(s) pour ce fourneau** — '
+                        f'il en faut **3 minimum** pour les statistiques ISO 19867 '
+                        f'(moyenne, écart-type, IC 90%).'
+                    )
+                else:
+                    st.success(
+                        f'✅ **{n_tests} tests enregistrés** — '
+                        f'statistiques ISO 19867 disponibles ci-dessous.'
+                    )
+            with col_btn:
+                if st.button('➕ Enregistrer ce test', use_container_width=True,
+                             help='Ajoute les résultats actuels (HP+MP+BP) à l\'historique '
+                                  'pour le calcul des statistiques ISO 19867.',
+                             disabled=(n_tests >= 3)):
+                    entree = {
+                        'fichier'  : nom_fichier,
+                        'tier'     : tier_global,
+                        'phases'   : {c: {
+                            'eff'       : a['eff'],
+                            'co_g_min'  : a['co_g_min'],
+                            'pm_mg_min' : a['pm_mg_min'],
+                            'co_mjd'    : a['co_mjd'],
+                            'pm_mjd'    : a['pm_mjd'],
+                            'mce'       : a['mce'],
+                        } for c, a in analyses.items()},
+                    }
+                    st.session_state.tests_accumules.append(entree)
+                    st.rerun()
+
+            # ── Guidage post-enregistrement ───────────────────────────
+            if 0 < n_tests < 3:
+                st.success(f'**Test {n_tests}/3 enregistre — Que faire maintenant ?**')
+                st.markdown(
+                    f'**1.** Remontez en haut de la page  \n'
+                    f'**2.** Dans la **barre laterale** a gauche, selectionnez le CSV du **test {n_tests + 1}**  \n'
+                    f'**3.** Cliquez **Reinitialiser les resultats** (bouton poubelle dans la barre laterale)  \n'
+                    f'**4.** Repetez : ajuster les intervalles > saisir les donnees > analyser > enregistrer'
+                )
+        else:
+            st.info(
+                f'ℹ️ {len(phases_ok)}/3 phases analysées. '
+                f'Analysez les 3 phases (HP+MP+BP) pour enregistrer un test complet '
+                f'et alimenter les statistiques ISO 19867.'
+            )
+
+        # ── Statistiques multi-tests (si ≥ 3 tests) ──────────────────
+        if n_tests >= 3:
+            st.subheader('📈 Statistiques ISO 19867-1 — Résultats agrégés')
+            st.caption(f'{n_tests} tests enregistrés · Moyenne ± Écart-type')
+            stats_rows = []
+            for code in ['HP', 'MP', 'BP']:
+                vals_eff = [t['phases'][code]['eff']       for t in st.session_state.tests_accumules if code in t['phases']]
+                vals_co  = [t['phases'][code]['co_g_min']  for t in st.session_state.tests_accumules if code in t['phases']]
+                vals_pm  = [t['phases'][code]['pm_mg_min'] for t in st.session_state.tests_accumules if code in t['phases']]
+                if vals_eff:
+                    stats_rows.append({
+                        'Phase'              : code,
+                        'Eff. moy. (%)'      : f'{np.mean(vals_eff):.1f} ± {np.std(vals_eff, ddof=1):.1f}',
+                        'CO moy. (g/min)'    : f'{np.mean(vals_co):.4f} ± {np.std(vals_co, ddof=1):.4f}',
+                        'PM₂.₅ moy. (mg/min)': f'{np.mean(vals_pm):.4f} ± {np.std(vals_pm, ddof=1):.4f}',
+                        'N tests'            : len(vals_eff),
+                    })
+            if stats_rows:
+                st.dataframe(pd.DataFrame(stats_rows).set_index('Phase'),
+                             use_container_width=True)
+            if st.button('🗑️ Effacer l\'historique des tests', use_container_width=False):
+                st.session_state.tests_accumules = []
+                st.rerun()
+            st.divider()
+
+        # ── Tableau de synthèse IWA-11 ────────────────────────────────
+        st.subheader('📊 Synthèse IWA-11 par phase')
+        synth_rows = []
+        for a in analyses.values():
+            synth_rows.append({
+                'Phase'              : f"{a['code']} — {a['label']}",
+                'CO (g/min)'         : f"{a['co_g_min']:.4f}",
+                'Tier CO'            : f"Tier {a['t_co_rate']}",
+                'PM₂.₅ (mg/min)'    : f"{a['pm_mg_min']:.4f}",
+                'Tier PM'            : f"Tier {a['t_pm_rate']}",
+                'Eff. % (av. char.)' : f"{a['eff']:.1f}",
+                'Tier Eff.'          : f"Tier {a['t_eff']}",
+                'MCE (%)'            : f"{a['mce']:.2f}",
+                'Tier IWA-11'        : f"Tier {a['t_iwa11']}",
+                'Facteur limitant'   : a['limitant'],
+            })
+        st.dataframe(pd.DataFrame(synth_rows).set_index('Phase'),
+                     use_container_width=True)
+
+        st.divider()
+
+        # ── Jauges d'émissions CO + PM ────────────────────────────────
+        st.subheader('🎯 Jauges d\'émissions CO et PM₂.₅ vs seuils IWA-11')
+        st.caption(
+            '**Lecture des jauges :** la valeur mesurée est affichée en grand avec le Tier obtenu. '
+            'Les zones colorées sur l\'arc indiquent les Tiers IWA-11 : '
+            '🟢 vert foncé = Tier 4 (Excellent) · vert clair = Tier 3 (Bon) · '
+            '🟡 jaune = Tier 2 (Intermédiaire) · 🟠 orange = Tier 1 (Basique) · 🔴 rouge = Tier 0 (Hors normes). '
+            'Les marqueurs T4/T3/T2/T1 sur l\'axe indiquent les seuils de chaque Tier. '
+            'La ligne sous le Tier indique combien il faut réduire pour atteindre le Tier supérieur.'
+        )
+        st.plotly_chart(graphique_jauges_emissions(analyses),
+                        use_container_width=True)
+
+        st.divider()
+
+        # ── Interprétation narrative ──────────────────────────────────
+        st.subheader('📝 Interprétation des résultats')
+        st.markdown(generer_texte(analyses, nom_fichier))
+
+        st.divider()
+
+        # ── Recommandations ───────────────────────────────────────────
+        st.subheader('💡 Recommandations')
+        for cat, rec in generer_recommandations(analyses):
+            st.markdown(f'**{cat}**')
+            st.markdown(f'> {rec}')
+
+        st.divider()
+
+        # ── Exports ───────────────────────────────────────────────────
+        st.subheader('📥 Exports')
+        col_pdf, col_xls = st.columns(2)
+
+        with col_pdf:
+            pdf_bytes = generer_pdf(
+                analyses, nom_fichier,
+                nom_testeur  = st.session_state.get('nom_testeur', ''),
+                nom_fourneau = st.session_state.get('nom_fourneau', ''),
+                date_test    = st.session_state.get('date_test', ''),
+                lieu_test    = st.session_state.get('lieu_test', ''),
+                n_replique   = st.session_state.get('n_replique', None),
+                remarques    = st.session_state.get('remarques', ''),
+            )
+            if pdf_bytes:
+                st.download_button(
+                    label='📄 Télécharger rapport PDF',
+                    data=pdf_bytes,
+                    file_name=f'rapport_LEMS_{nom_fichier.replace(".csv","")}.pdf',
+                    mime='application/pdf',
+                    use_container_width=True,
+                )
+            else:
+                st.warning('fpdf2 non disponible — installez-le avec `pip install fpdf2`.')
+
+        with col_xls:
+            buffer = io.BytesIO()
+            with pd.ExcelWriter(buffer, engine='openpyxl') as writer:
+                for code in ['HP', 'MP', 'BP']:
+                    r = phases_ok.get(code)
+                    if not r:
+                        continue
+                    ligne = {
+                        'Fichier CSV'             : r.get('_fichier', ''),
+                        'Durée (min)'             : r['duree_min'],
+                        'Masse comb. sec (g)'     : r['thermique']['bois_brule_sec_kg'] * 1000,
+                        'Eff. sans charbon (%)'   : r['thermique']['efficacite_sans_char_pct'],
+                        'Eff. avec charbon (%)'   : r['thermique']['efficacite_avec_char_pct'],
+                        'Taux combustion (g/min)' : r['thermique']['taux_combustion_g_min'],
+                        'Puissance feu (W)'       : r['thermique']['puissance_feu_kW'] * 1000,
+                        'Puissance cuisson (W)'   : r['thermique']['puissance_cuis_kW'] * 1000,
+                        'MCE (%)'                 : r['stats']['MCE_pct'],
+                        'CO total (g)'            : r['totaux']['CO_total_g'],
+                        'CO / énergie utile (g/MJ)': r['normalises']['CO_par_utile_g_MJ'],
+                        'PM2.5 total (mg)'        : r['totaux']['PM_total_mg'],
+                        'PM2.5 / énergie utile (mg/MJ)': r['normalises']['PM_par_utile_mg_MJ'],
+                        'CO2 total (g)'           : r['totaux']['CO2_total_g'],
+                        'Tier IWA-11'             : r['tier'],
+                    }
+                    pd.DataFrame([ligne]).to_excel(writer, sheet_name=code, index=False)
+            st.download_button(
+                label='📊 Télécharger rapport Excel',
+                data=buffer.getvalue(),
+                file_name=f'rapport_LEMS_{nom_fichier.replace(".csv","")}.xlsx',
+                mime='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+                use_container_width=True,
+            )

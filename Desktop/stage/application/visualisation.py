@@ -4,12 +4,14 @@
 Module 3 : Visualisation interactive des données LEMS avec Plotly.
 
 Fonctions exposées :
-    graphique_concentrations(df_cal)      → fig Plotly (CO, PM, CO₂, TC)
-    graphique_taux_emission(df_taux)      → fig Plotly (taux CO et PM)
-    graphique_temperature(df_cal)         → fig Plotly (GasTemp, FlueTemp, TC)
-    graphique_debit(df_cal)               → fig Plotly (Flow)
-    tableau_resume(stats, totaux, therm)  → fig Plotly (tableau récap)
-    graphique_tier(tier, stats)           → fig Plotly (jauge Tier)
+    graphique_concentrations(df_cal)                          → fig Plotly (CO, PM, CO₂, TC)
+    graphique_taux_emission(df_taux)                          → fig Plotly (taux CO et PM)
+    graphique_temperature(df_cal)                             → fig Plotly (GasTemp, FlueTemp, TC)
+    graphique_debit(df_cal)                                   → fig Plotly (Flow)
+    tableau_resume(stats, totaux, therm)                      → fig Plotly (tableau récap)
+    graphique_tier(tier, stats)                               → fig Plotly (jauge Tier)
+    tableau_calibration_df(df_brut, df_cal, cal)              → DataFrame (8 capteurs + descriptions)
+    graphique_comparaison_calibration(df_brut, df_cal, cal)   → fig Plotly (grille 2×4, un panneau par capteur)
 """
 
 import plotly.graph_objects as go
@@ -307,6 +309,169 @@ def graphique_tier(tier: int, stats: dict) -> go.Figure:
 
 
 # ─────────────────────────────────────────────────────────────────────
+# 7. Comparaison données brutes / calibrées
+# ─────────────────────────────────────────────────────────────────────
+
+def tableau_calibration_df(
+    df_brut: pd.DataFrame,
+    df_cal: pd.DataFrame,
+    calibration: list,
+) -> pd.DataFrame:
+    """
+    Retourne un DataFrame pédagogique expliquant les facteurs de calibration.
+    Colonnes : Capteur | Description | Valeur brute moy. | × Facteur | = Valeur calibrée.
+    """
+    NOMS  = ['CO', 'GasTemp', 'PM', 'Flow', 'FlueTemp', 'TC', 'CO2', 'PM_RH']
+    UNITS = ['ppm', '°C', 'µg/m³', 'log-units', '°C', '°C', 'ppm', 'µg/m³']
+    DESCS = [
+        'Monoxyde de carbone (polluant principal)',
+        'Température des gaz dans le tunnel de dilution',
+        'Particules fines PM₂.₅',
+        'Débit volumique — convertir log-units → ΔP via formule Pitot',
+        'Température de la cheminée (FlueTemp)',
+        'Thermocouple de référence',
+        'Dioxyde de carbone',
+        'PM₂.₅ avec correction humidité relative',
+    ]
+    cal_pad = (list(calibration) + [1.0] * 8)[:8]
+    rows = []
+    for i, (nom, unite, desc) in enumerate(zip(NOMS, UNITS, DESCS)):
+        brut = df_brut[nom].mean() if nom in df_brut.columns else None
+        cal  = df_cal[nom].mean()  if nom in df_cal.columns  else None
+        rows.append({
+            'Capteur'              : nom,
+            'Description'          : desc,
+            'Valeur brute moy.'    : f'{brut:.0f} log-units' if brut is not None else 'N/A',
+            '× Facteur'            : f'{cal_pad[i]:.5g}',
+            '= Valeur calibrée'    : f'{cal:.2f} {unite}'    if cal  is not None else 'N/A',
+        })
+    return pd.DataFrame(rows).set_index('Capteur')
+
+
+def graphique_comparaison_calibration(
+    df_brut: pd.DataFrame,
+    df_cal: pd.DataFrame,
+    calibration: list,
+) -> go.Figure:
+    """
+    Grille 4 lignes × 2 colonnes : un capteur par ligne.
+    Colonne gauche = signal BRUT (log-units, gris).
+    Colonne droite = signal CALIBRÉ (unité physique, couleur).
+    Les formes doivent être identiques → calibration fiable.
+    """
+    SELECTION = [
+        ('CO',      'ppm',    '#2196F3', 'CO',      'Monoxyde de carbone'),
+        ('PM',      'µg/m³',  '#F44336', 'PM₂.₅',  'Particules fines'),
+        ('GasTemp', '°C',     '#9C27B0', 'GasTemp', 'Température des gaz'),
+        ('CO2',     'ppm',    '#4CAF50', 'CO₂',     'Dioxyde de carbone'),
+    ]
+    t = df_brut['seconds'] / 60.0
+
+    def _correlation(a: pd.Series, b: pd.Series) -> float:
+        try:
+            r = float(a.fillna(0).corr(b.fillna(0)))
+            return 0.0 if (r != r) else r  # NaN → 0.0
+        except Exception:
+            return 0.0  # 1.0 était un bug : exception = ✅ faux
+
+    def _verdict(r: float) -> str:
+        if r > 0.90:
+            return '✅ Formes identiques'
+        if r < -0.90:
+            return f'🔄 Signal inversé (r={r:.2f}) — facteur négatif ?'
+        return f'⚠️ Vérifier (r={r:.2f})'
+
+    # Titres : colonne gauche = brut, colonne droite = calibré avec verdict
+    panel_titles = []
+    verdicts = []
+    for nom, unite, color, court, long_label in SELECTION:
+        y_b = df_brut[nom] if nom in df_brut.columns else pd.Series(dtype=float)
+        y_c = df_cal[nom]  if nom in df_cal.columns  else pd.Series(dtype=float)
+        r   = _correlation(y_b, y_c)
+        verdicts.append(r)
+        panel_titles.append(f'{court} — brut (log-units)')
+        panel_titles.append(f'{court} — calibré ({unite})  {_verdict(r)}')
+
+    fig = make_subplots(
+        rows=4, cols=2,
+        subplot_titles=panel_titles,
+        shared_xaxes=True,
+        vertical_spacing=0.07,
+        horizontal_spacing=0.12,
+    )
+
+    for i, (nom, unite, color, court, long_label) in enumerate(SELECTION):
+        row = i + 1
+        y_b = df_brut[nom] if nom in df_brut.columns else pd.Series(dtype=float)
+        y_c = df_cal[nom]  if nom in df_cal.columns  else pd.Series(dtype=float)
+
+        # ── Colonne gauche : signal brut ──────────────────────────────
+        fig.add_trace(go.Scatter(
+            x=t, y=y_b,
+            name=f'{court} brut',
+            showlegend=False,
+            line=dict(color='#757575', width=1.5),
+            fill='tozeroy',
+            fillcolor='rgba(117,117,117,0.08)',
+            hovertemplate=f'<b>{court} brut</b> : %{{y:.0f}} log-units<extra></extra>',
+        ), row=row, col=1)
+
+        # ── Colonne droite : signal calibré ───────────────────────────
+        fig.add_trace(go.Scatter(
+            x=t, y=y_c,
+            name=f'{court} calibré',
+            showlegend=False,
+            line=dict(color=color, width=1.8),
+            fill='tozeroy',
+            fillcolor=f'rgba({int(color[1:3],16)},{int(color[3:5],16)},{int(color[5:7],16)},0.10)',
+            hovertemplate=f'<b>{court} calibré</b> : %{{y:.2f}} {unite}<extra></extra>',
+        ), row=row, col=2)
+
+        # Axes brut (gris)
+        fig.update_yaxes(
+            title_text='log-units',
+            title_font=dict(color='#757575', size=10),
+            tickfont=dict(color='#757575', size=9),
+            showgrid=True, gridcolor='#F5F5F5', zeroline=False,
+            row=row, col=1,
+        )
+        # Axes calibré (couleur)
+        fig.update_yaxes(
+            title_text=unite,
+            title_font=dict(color=color, size=10),
+            tickfont=dict(color=color, size=9),
+            showgrid=True, gridcolor='#F5F5F5', zeroline=False,
+            row=row, col=2,
+        )
+
+    # Axe X uniquement sur la dernière ligne
+    for col in [1, 2]:
+        fig.update_xaxes(
+            title_text='Temps (min)',
+            title_font=dict(size=11),
+            tickfont=dict(size=10),
+            showgrid=True, gridcolor='#EEEEEE',
+            zeroline=False, row=4, col=col,
+        )
+
+    fig.update_layout(
+        height=820,
+        title=dict(
+            text='Calibration — BRUT (gauche) vs CALIBRÉ (droite) · Formes identiques = calibration fiable',
+            font=dict(size=13, color='#333'),
+            x=0.5, xanchor='center',
+        ),
+        plot_bgcolor='white', paper_bgcolor='white',
+        hovermode='x unified',
+        font=dict(family='Arial', size=11),
+        margin=dict(l=70, r=70, t=80, b=50),
+        showlegend=False,
+    )
+    fig.update_annotations(font=dict(size=11, color='#333'))
+    return fig
+
+
+# ─────────────────────────────────────────────────────────────────────
 # Test rapide si on lance ce fichier directement
 # ─────────────────────────────────────────────────────────────────────
 
@@ -323,14 +488,16 @@ if __name__ == '__main__':
 
     # Génération de tous les graphiques et sauvegarde HTML
     figs = {
-        'concentrations' : graphique_concentrations(res['df_cal']),
-        'taux_emission'  : graphique_taux_emission(res['df_taux']),
-        'temperatures'   : graphique_temperature(res['df_cal']),
-        'debit'          : graphique_debit(res['df_cal']),
-        'tableau'        : tableau_resume(
-                               res['stats'], res['totaux'], res['thermique'],
-                               res['tier'], res['label_tier'], res['duree_min']),
-        'tier'           : graphique_tier(res['tier'], res['stats']),
+        'concentrations'          : graphique_concentrations(res['df_cal']),
+        'taux_emission'           : graphique_taux_emission(res['df_taux']),
+        'temperatures'            : graphique_temperature(res['df_cal']),
+        'debit'                   : graphique_debit(res['df_cal']),
+        'tableau'                 : tableau_resume(
+                                        res['stats'], res['totaux'], res['thermique'],
+                                        res['tier'], res['label_tier'], res['duree_min']),
+        'tier'                    : graphique_tier(res['tier'], res['stats']),
+        'comparaison_calibration' : graphique_comparaison_calibration(
+                                        res['df_brut'], res['df_cal'], res_csv['calibration']),
     }
 
     for nom, fig in figs.items():
