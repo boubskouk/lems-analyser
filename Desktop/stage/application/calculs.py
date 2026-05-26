@@ -53,7 +53,14 @@ COMBUSTIBLES = {
 
 PCI_DEFAUT       = 17829.0
 FRAC_C_DEFAUT    = 0.50
-HHV_CHARBON      = 29400.0   # kJ/kg  PCI charbon résiduel (T1.xlsx)
+HHV_CHARBON      = 29490.0   # kJ/kg  PCI charbon résiduel (T1.xlsx)
+
+# Conversion PM scattering → concentration massique :
+# cal_pm (ligne #0 CSV) est un facteur scattering [1/Mm / logunit].
+# PM_ug/m³ = PM_scat_zeroed (1/Mm) / (MSE × 1e-3)
+# MSE = 3 m²/g  ← T1.xlsx Assumptions L6 ; donne facteur 0.003
+MSE_PM            = 3.0        # Mass Scattering Efficiency (m²/g) — T1.xlsx Assumptions L6
+_MSE_FACTOR       = MSE_PM * 1e-3  # facteur effectif pour 1/Mm → ug/m³
 
 # ─────────────────────────────────────────────────────────────────────
 # Tier ISO/IWA-11  →  (CO_max g/min, PM_max mg/min)
@@ -156,8 +163,11 @@ def calculer_taux_emission(df_cal: pd.DataFrame,
     debit_m3_min = calculer_debit_tunnel(df['Flow'], flue_temp_C, baseline_flow, p_Pa)
     df['debit_m3_min'] = debit_m3_min
 
-    # PM : soustraction du fond, borné à 0 (T1.xlsx : col Q = col P − background)
-    df['PM_ug_zeroed'] = (df['PM'] - bg_pm_ug).clip(lower=0)
+    # PM pipeline 2 étapes (T1.xlsx Assumptions L6) :
+    #   df['PM'] est en 1/Mm après appliquer_calibration (cal_pm = facteur scattering).
+    #   bg_pm_ug est aussi en 1/Mm (bg_PM_log × cal_pm dans app.py).
+    #   Étape 2 : PM_scat_zeroed (1/Mm) → PM_ug/m³ via MSE = 3 m²/g
+    df['PM_ug_zeroed'] = (df['PM'] - bg_pm_ug).clip(lower=0) / _MSE_FACTOR
     df['PM_mg_m3']     = df['PM_ug_zeroed'] / 1000.0
 
     # Correction température : T1.xlsx utilise le débit molaire à la température réelle
@@ -249,12 +259,9 @@ def calculer_metriques_thermiques(df_cal: pd.DataFrame, ext: dict) -> dict:
         masse_eau = ext.get('masse_eau_kg', 1.0)
         Q_utile   = masse_eau * CP_EAU * (ext.get('T_eau_fin', 90) - ext.get('T_eau_debut', 20))
 
-    # Efficacité thermique sans charbon = Q_utile / (bois_sec_initial × PCI)
-    Q_comb_initial = masse_bois_sec * pci
-    eff_sans_char = (Q_utile / Q_comb_initial * 100.0) if Q_comb_initial > 0 else 0.0
-
-    # Efficacité thermique avec charbon = (Q_utile + Q_char) / (bois_sec_initial × PCI)
-    eff_avec_char = ((Q_utile + Q_char) / Q_comb_initial * 100.0) if Q_comb_initial > 0 else 0.0
+    # Efficacité thermique ISO 19867 : dénominateur = bois BRÛLÉ sec × PCI (pas le bois initial)
+    eff_sans_char = (Q_utile / Q_combustible * 100.0) if Q_combustible > 0 else 0.0
+    eff_avec_char = ((Q_utile + Q_char) / Q_combustible * 100.0) if Q_combustible > 0 else 0.0
 
     # Puissances (kW)
     duree_s = duree_min * 60.0

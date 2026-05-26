@@ -122,11 +122,11 @@ with st.sidebar:
 
     # ── Avancement tests ISO 19867 ────────────────────────────────────
     _n_acc_sb = len(st.session_state.tests_accumules)
-    _test_sb  = min(_n_acc_sb + 1, 3)
-    if _n_acc_sb < 3:
-        st.info(f'**Test {_test_sb} / 3**  \nISO 19867 — 3 repetitions minimum')
+    if _n_acc_sb < 5:
+        _test_sb = _n_acc_sb + 1
+        st.info(f'**Test {_test_sb} / 5**  \nISO 19867 — 5 répétitions recommandées')
     else:
-        st.success('**3 tests complets**')
+        st.success(f'**{_n_acc_sb} tests enregistrés ✅**  \nMinimum ISO atteint')
 
     # ── Source CSV ────────────────────────────────────────────────────
     st.header('📂 Étape 1 — Fichier CSV')
@@ -243,32 +243,40 @@ _ETAPES_LBL = [
     '💾 5. Enregistrer',
 ]
 
-if _n_acc >= 3:
-    st.success(
-        '🎉 **3 tests enregistrés !**  '
-        'Consultez les **statistiques ISO 19867** dans l\'onglet **📊 Rapport global** ci-dessous.'
-    )
+if _n_acc >= 5:
+    _col_done1, _col_done2 = st.columns([3, 1])
+    with _col_done1:
+        st.success(
+            f'🎉 **{_n_acc} tests enregistrés** — minimum ISO 19867 atteint !  \n'
+            f'Vous pouvez enregistrer des tests supplémentaires ou générer le rapport final.'
+        )
+    with _col_done2:
+        if st.button('📊 Rapport final', type='primary', use_container_width=True,
+                     key='btn_rapport_final_top',
+                     help='Aller directement aux statistiques ISO 19867 et aux exports.'):
+            st.session_state['goto_rapport'] = True
+            st.rerun()
 else:
     _test_n = _n_acc + 1
     if not res_csv:
         _ei  = 0
-        _msg = (f'👈 **Test {_test_n}/3 — Étape 1 :** Chargez le fichier CSV du test '
+        _msg = (f'👈 **Test {_test_n}/5 — Étape 1 :** Chargez le fichier CSV du test '
                 f'dans la **barre latérale à gauche**.')
         _msg_type = 'warning'
     elif _n_res == 0:
         _ei  = 1
-        _msg = (f'⬇️ **Test {_test_n}/3 — Étape 2 :** CSV chargé ✅  '
+        _msg = (f'⬇️ **Test {_test_n}/5 — Étape 2 :** CSV chargé ✅  '
                 f'Ajustez les **intervalles HP / MP / BP** sur le graphe avec les sliders, '
                 f'puis descendez pour saisir les données de pesée.')
         _msg_type = 'info'
     elif 0 < _n_res < 3:
         _ei  = 3
-        _msg = (f'⬇️ **Test {_test_n}/3 — Étape 3 :** {_n_res}/3 phases analysées.  '
+        _msg = (f'⬇️ **Test {_test_n}/5 — Étape 3 :** {_n_res}/3 phases analysées.  '
                 f'Analysez les phases restantes ou cliquez **"▶▶ Analyser les 3 phases"**.')
         _msg_type = 'info'
     else:
         _ei  = 4
-        _msg = (f'➡️ **Test {_test_n}/3 — Étape 4 :** ✅ 3 phases analysées !  '
+        _msg = (f'➡️ **Test {_test_n}/5 — Étape 4 :** ✅ 3 phases analysées !  '
                 f'Descendez jusqu\'à l\'onglet **📊 Rapport global** et cliquez '
                 f'**"➕ Enregistrer ce test"** pour valider ce test.')
         _msg_type = 'success'
@@ -277,11 +285,11 @@ else:
     _step_cols = st.columns(5)
     for _si, (_sc, _slbl) in enumerate(zip(_step_cols, _ETAPES_LBL)):
         if _si < _ei:
-            _sc.success(f'~~{_slbl}~~')   # fait = vert barré
+            _sc.success(f'~~{_slbl}~~')
         elif _si == _ei:
-            _sc.info(f'**{_slbl}**')       # en cours = bleu gras
+            _sc.info(f'**{_slbl}**')
         else:
-            _sc.caption(_slbl)             # à venir = gris discret
+            _sc.caption(_slbl)
 
     if _msg_type == 'warning':
         st.warning(_msg)
@@ -826,7 +834,7 @@ def tableau_phase(code):
 
 
 # ── Bannière CTA : guider vers "Rapport global" quand les 3 phases sont prêtes ──
-if len(st.session_state.resultats) == 3 and len(st.session_state.tests_accumules) < 3:
+if len(st.session_state.resultats) == 3 and len(st.session_state.tests_accumules) < 5:
     st.success(
         '**Les 3 phases sont analysees !**  \n'
         'Cliquez sur l\'onglet **Rapport global** ci-dessous, '
@@ -890,26 +898,25 @@ with tab_global:
             with col_cpt:
                 if n_tests == 0:
                     st.warning(
-                        f'🧪 **0 test enregistré pour ce fourneau** — '
-                        f'il en faut **3 minimum** pour les statistiques ISO 19867 '
+                        f'🧪 **0 test enregistré** — '
+                        f'il en faut **5 minimum** pour les statistiques ISO 19867 '
                         f'(moyenne, écart-type, IC 90%).'
                     )
-                elif n_tests < 3:
+                elif n_tests < 5:
                     st.warning(
-                        f'🧪 **{n_tests} test(s) enregistré(s) pour ce fourneau** — '
-                        f'il en faut **3 minimum** pour les statistiques ISO 19867 '
-                        f'(moyenne, écart-type, IC 90%).'
+                        f'🧪 **{n_tests} / 5 test(s) enregistré(s)** — '
+                        f'continuez jusqu\'à 5 pour satisfaire ISO 19867.'
                     )
                 else:
                     st.success(
                         f'✅ **{n_tests} tests enregistrés** — '
-                        f'statistiques ISO 19867 disponibles ci-dessous.'
+                        f'statistiques ISO 19867 disponibles ci-dessous.  \n'
+                        f'Vous pouvez en ajouter d\'autres ou générer le rapport final.'
                     )
             with col_btn:
                 if st.button('➕ Enregistrer ce test', use_container_width=True,
                              help='Ajoute les résultats actuels (HP+MP+BP) à l\'historique '
-                                  'pour le calcul des statistiques ISO 19867.',
-                             disabled=(n_tests >= 3)):
+                                  'pour le calcul des statistiques ISO 19867.'):
                     entree = {
                         'fichier'  : nom_fichier,
                         'tier'     : tier_global,
@@ -926,14 +933,33 @@ with tab_global:
                     st.rerun()
 
             # ── Guidage post-enregistrement ───────────────────────────
-            if 0 < n_tests < 3:
-                st.success(f'**Test {n_tests}/3 enregistre — Que faire maintenant ?**')
-                st.markdown(
+            if 0 < n_tests < 5:
+                st.info(
+                    f'**Test {n_tests}/5 enregistré — Que faire maintenant ?**  \n'
                     f'**1.** Remontez en haut de la page  \n'
-                    f'**2.** Dans la **barre laterale** a gauche, selectionnez le CSV du **test {n_tests + 1}**  \n'
-                    f'**3.** Cliquez **Reinitialiser les resultats** (bouton poubelle dans la barre laterale)  \n'
-                    f'**4.** Repetez : ajuster les intervalles > saisir les donnees > analyser > enregistrer'
+                    f'**2.** Dans la **barre latérale**, sélectionnez le CSV du **test {n_tests + 1}**  \n'
+                    f'**3.** Cliquez **Réinitialiser les résultats** (bouton 🗑️ dans la barre latérale)  \n'
+                    f'**4.** Répétez : ajuster intervalles → saisir données → analyser → enregistrer'
                 )
+
+            # ── Bouton "Terminer" visible dès 5 tests ─────────────────
+            if n_tests >= 5:
+                st.divider()
+                _col_t1, _col_t2, _col_t3 = st.columns([1, 2, 1])
+                with _col_t2:
+                    st.success(
+                        f'**Vous avez {n_tests} tests enregistrés.**  \n'
+                        f'Vous pouvez en ajouter d\'autres (pour plus de robustesse)  \n'
+                        f'ou **terminer et télécharger votre rapport final** ci-dessous.'
+                    )
+                    st.button(
+                        '📥 Terminer — Télécharger le rapport final',
+                        key='btn_terminer',
+                        type='primary',
+                        use_container_width=True,
+                        help='Les exports PDF et Excel sont disponibles dans la section "Exports" ci-dessous.',
+                    )
+                    st.caption('↓ Section "Exports" juste en-dessous')
         else:
             st.info(
                 f'ℹ️ {len(phases_ok)}/3 phases analysées. '
@@ -941,10 +967,10 @@ with tab_global:
                 f'et alimenter les statistiques ISO 19867.'
             )
 
-        # ── Statistiques multi-tests (si ≥ 3 tests) ──────────────────
-        if n_tests >= 3:
+        # ── Statistiques multi-tests (si ≥ 5 tests) ──────────────────
+        if n_tests >= 5:
             st.subheader('📈 Statistiques ISO 19867-1 — Résultats agrégés')
-            st.caption(f'{n_tests} tests enregistrés · Moyenne ± Écart-type')
+            st.caption(f'{n_tests} tests enregistrés · Moyenne ± Écart-type (ddof=1)')
             stats_rows = []
             for code in ['HP', 'MP', 'BP']:
                 vals_eff = [t['phases'][code]['eff']       for t in st.session_state.tests_accumules if code in t['phases']]
