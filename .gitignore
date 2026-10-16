@@ -4,6 +4,9 @@ __pycache__/
 .env
 *.csv
 !csv/T1_foyer_kevin.csv
+!csv/01-12-2022-Sakkanal-T11.csv
+!csv/2022-12-08-Jambarcharbon-T4.csv
+!csv/15-01-2026-MauvaisFourneau-T1.csv
 *.xlsx
 *.pdf
 *.docx
