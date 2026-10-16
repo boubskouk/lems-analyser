@@ -55,23 +55,45 @@ PCI_DEFAUT       = 17829.0
 FRAC_C_DEFAUT    = 0.50
 HHV_CHARBON      = 29490.0   # kJ/kg  PCI charbon résiduel (T1.xlsx)
 
+# Combustibles pour lesquels le résidu en fin de phase est du CHARBON produit par
+# combustion incomplète du combustible initial (donc une 2e forme d'efficacité,
+# "avec résidu charbonneux", a un sens physique : on crédite l'énergie du charbon
+# non brûlé). Pour les autres combustibles (charbon de bois lui-même, GPL, kérosène,
+# charbon minéral, éthanol...), le résidu pesé est juste du combustible non brûlé de
+# même nature que celui chargé — il n'y a qu'une seule efficacité pertinente.
+# Remarque labo CERER (15/10/2026) : limiter aux deux bois.
+FUELS_AVEC_RESIDU_CHARBONNEUX = {'Bois dur moyen', 'Bois tendre moyen'}
+
 # Conversion PM scattering → concentration massique :
 # cal_pm (ligne #0 CSV) est un facteur scattering [1/Mm / logunit].
 # PM_ug/m³ = PM_scat_zeroed (1/Mm) / (MSE × 1e-3)
 # MSE = 3 m²/g  ← T1.xlsx Assumptions L6 ; donne facteur 0.003
+# ATTENTION (2026-10-16) : T1.xlsx ne se contente PAS de ce facteur fixe pour son
+# résultat final — il dérive une MSE propre à chaque phase à partir du filtre
+# gravimétrique pesé (ISO!M39 net filter mass / débit supposé 17,397 LPM, comparé au
+# coefficient de diffusion moyen de la phase), puis l'applique à la trace optique
+# seconde par seconde (Logger Data col R). Cette MSE dérivée varie de 0,0026 à 0,033
+# m²/g sur un seul test (foyer Kevin) — un facteur fixe unique ne peut PAS reproduire
+# T1.xlsx sans données de filtre gravimétrique propres à chaque test. Voir le point 5
+# de LEMS-Analyser-Questions-maitre-de-stage.docx.
 MSE_PM            = 3.0        # Mass Scattering Efficiency (m²/g) — T1.xlsx Assumptions L6
 _MSE_FACTOR       = MSE_PM * 1e-3  # facteur effectif pour 1/Mm → ug/m³
 
 # ─────────────────────────────────────────────────────────────────────
-# Tier ISO/IWA-11  →  (CO_max g/min, PM_max mg/min)
+# Tier ISO 19867-1:2018 Tableau 1 (Objectifs de performances volontaires)
+# →  (CO_max g/MJd, PM_max mg/MJd) — confirmé le 2026-10-16 contre le texte
+# officiel de la norme (photo fournie par l'utilisateur). Remplace les anciens
+# seuils en g/min dont l'origine n'était pas confirmée.
 # ─────────────────────────────────────────────────────────────────────
 SEUILS_TIER = {
-    4: (0.50,  0.50),
-    3: (2.00,  2.50),
-    2: (4.00,  5.00),
-    1: (8.00, 10.00),
+    5: (3.0,   5.0),
+    4: (4.4,   62.0),
+    3: (7.2,   218.0),
+    2: (11.5,  481.0),
+    1: (18.3, 1030.0),
 }
 LABEL_TIER = {
+    5: 'Excellent+ (Tier 5)',
     4: 'Excellent (Tier 4)',
     3: 'Bon (Tier 3)',
     2: 'Intermédiaire (Tier 2)',
@@ -259,9 +281,15 @@ def calculer_metriques_thermiques(df_cal: pd.DataFrame, ext: dict) -> dict:
         masse_eau = ext.get('masse_eau_kg', 1.0)
         Q_utile   = masse_eau * CP_EAU * (ext.get('T_eau_fin', 90) - ext.get('T_eau_debut', 20))
 
-    # Efficacité thermique ISO 19867 : dénominateur = bois BRÛLÉ sec × PCI (pas le bois initial)
+    # Efficacité thermique ISO 19867 : dénominateur = combustible BRÛLÉ sec × PCI (pas le chargé initial)
+    a_residu_charbonneux = type_comb in FUELS_AVEC_RESIDU_CHARBONNEUX
     eff_sans_char = (Q_utile / Q_combustible * 100.0) if Q_combustible > 0 else 0.0
-    eff_avec_char = ((Q_utile + Q_char) / Q_combustible * 100.0) if Q_combustible > 0 else 0.0
+    if a_residu_charbonneux:
+        eff_avec_char = ((Q_utile + Q_char) / Q_combustible * 100.0) if Q_combustible > 0 else 0.0
+    else:
+        # Pas de notion de "résidu charbonneux" distincte pour ce combustible
+        # (le résidu pesé est du combustible non brûlé, pas un sous-produit à créditer).
+        eff_avec_char = eff_sans_char
 
     # Puissances (kW)
     duree_s = duree_min * 60.0
@@ -284,6 +312,7 @@ def calculer_metriques_thermiques(df_cal: pd.DataFrame, ext: dict) -> dict:
         'Q_char_kJ'               : round(Q_char, 2),
         'efficacite_sans_char_pct': round(eff_sans_char, 2),
         'efficacite_avec_char_pct': round(eff_avec_char, 2),
+        'a_residu_charbonneux'    : a_residu_charbonneux,
         'puissance_feu_kW'        : round(puissance_feu, 4),
         'puissance_cuis_kW'       : round(puissance_cuis, 4),
         'taux_combustion_g_min'   : round(taux_combustion, 4),
@@ -343,10 +372,12 @@ def calculer_mce(df_taux: pd.DataFrame) -> float:
 # 7. Classement Tier ISO/IWA-11
 # ═════════════════════════════════════════════════════════════════════
 
-def calculer_tier(co_g_min: float, pm_mg_min: float) -> int:
-    for tier in [4, 3, 2, 1]:
+def calculer_tier(co_g_mjd: float, pm_mg_mjd: float) -> int:
+    """Tier ISO 19867-1 à partir des émissions normalisées par énergie utile
+    (g/MJd, mg/MJd) — voir SEUILS_TIER."""
+    for tier in [5, 4, 3, 2, 1]:
         co_max, pm_max = SEUILS_TIER[tier]
-        if co_g_min < co_max and pm_mg_min < pm_max:
+        if co_g_mjd < co_max and pm_mg_mjd < pm_max:
             return tier
     return 0
 
@@ -413,9 +444,9 @@ def analyser(resultat_csv: dict, donnees_ext: dict = None) -> dict:
         'MCE_pct'            : mce,
     }
 
-    co_g_min  = stats['CO_taux_moy_mg_min'] / 1000
-    pm_mg_min = stats['PM_taux_moy_mg_min']
-    tier      = calculer_tier(co_g_min, pm_mg_min)
+    co_g_mjd  = normalises.get('CO_par_utile_g_MJ', 0.0)
+    pm_mg_mjd = normalises.get('PM_par_utile_mg_MJ', 0.0)
+    tier      = calculer_tier(co_g_mjd, pm_mg_mjd)
 
     return {
         'df_brut'    : df_brut,

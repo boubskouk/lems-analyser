@@ -20,15 +20,108 @@ from interpretation import (analyser_phase, graphique_jauges_emissions,
                              TIER_COUL, TIER_BG, TIER_LABEL, TIER_EMOJI)
 
 # ─────────────────────────────────────────────────────────────────────
+APP_CSS = """
+<style>
+:root {
+  --lems-primary: #3D5A80;
+  --lems-primary-dark: #293F5C;
+  --lems-bg-soft: #F4F6F8;
+  --lems-border: #E2E8F0;
+}
+
+.lems-header {
+  display: flex;
+  align-items: center;
+  gap: 18px;
+  background: linear-gradient(135deg, var(--lems-primary) 0%, var(--lems-primary-dark) 100%);
+  color: #fff;
+  padding: 20px 28px;
+  border-radius: 12px;
+  margin-bottom: 6px;
+}
+.lems-header__icon { font-size: 2.3rem; line-height: 1; }
+.lems-header__title { font-size: 1.55rem; font-weight: 700; letter-spacing: -0.01em; }
+.lems-header__subtitle { font-size: 1.0rem; opacity: 0.92; margin-top: 2px; }
+.lems-header__meta { font-size: 0.8rem; opacity: 0.78; margin-top: 6px; }
+.lems-header__badge {
+  margin-left: auto;
+  background: rgba(255,255,255,0.18);
+  border: 1px solid rgba(255,255,255,0.35);
+  padding: 6px 12px;
+  border-radius: 999px;
+  font-size: 0.78rem;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.phase-chip {
+  padding: 8px 14px;
+  border-radius: 8px;
+  border-left: 4px solid var(--chip-border, #999);
+  background: var(--chip-fill, #f5f5f5);
+  font-weight: 700;
+  font-size: 1.05rem;
+  box-shadow: 0 1px 2px rgba(0,0,0,0.05);
+}
+
+.tier-banner {
+  border-radius: 10px;
+  box-shadow: 0 1px 3px rgba(0,0,0,0.08);
+}
+
+div[data-testid="stButton"] button {
+  border-radius: 8px;
+  font-weight: 600;
+  transition: box-shadow 0.15s ease;
+}
+div[data-testid="stButton"] button:hover {
+  box-shadow: 0 2px 8px rgba(0,0,0,0.12);
+}
+
+div[data-testid="stVerticalBlockBorderWrapper"] {
+  border-radius: 12px !important;
+}
+
+section[data-testid="stSidebar"] h2 {
+  font-size: 1.0rem;
+  border-bottom: 1px solid var(--lems-border);
+  padding-bottom: 6px;
+}
+
+div[data-testid="stMetric"] {
+  background: var(--lems-bg-soft);
+  border-radius: 8px;
+  padding: 8px 10px;
+}
+
+div[data-testid="stDataFrame"] {
+  border-radius: 8px;
+  overflow: hidden;
+  border: 1px solid var(--lems-border);
+}
+</style>
+"""
+
 st.set_page_config(
     page_title='LEMS Analyser',
     page_icon='🔥',
     layout='wide',
     initial_sidebar_state='expanded',
 )
-st.title('🔥 LEMS Analyser — Analyse des émissions de foyers biomasse')
-st.caption('Conforme ISO 19867-1 · Classement ISO/IWA-11 · CERER / ESP-UCAD')
-st.warning('⚠️ Version bêta — résultats en cours de validation. Ne pas utiliser pour des rapports officiels.')
+st.markdown(APP_CSS, unsafe_allow_html=True)
+st.markdown(
+    '<div class="lems-header">'
+    '<div class="lems-header__icon">🔥</div>'
+    '<div>'
+    '<div class="lems-header__title">LEMS Analyser</div>'
+    '<div class="lems-header__subtitle">Analyse des émissions de foyers biomasse</div>'
+    '<div class="lems-header__meta">Conforme ISO 19867-1 · Classement ISO/IWA-11 · CERER / ESP-UCAD</div>'
+    '</div>'
+    '<div class="lems-header__badge">⚠️ Version bêta</div>'
+    '</div>',
+    unsafe_allow_html=True,
+)
+st.caption('Résultats en cours de validation — ne pas utiliser pour des rapports officiels.')
 
 CSV_TEST       = os.path.join(os.path.dirname(__file__), 'csv', '01-12-2022-Sakkanal-T11.csv')
 DOSSIER_DEFAUT = r'C:\Emissions-Output'
@@ -327,11 +420,12 @@ if res_csv is not None:
     duree_tot = (df0['seconds'].max() - df0['seconds'].min()) / 60.0
 
     st.subheader(f'📄 {nom_fichier}')
-    m1, m2, m3, m4 = st.columns(4)
-    m1.metric('Date',         res_csv['date'])
-    m2.metric('Heure début',  res_csv['heure'])
-    m3.metric('Durée totale', f'{duree_tot:.1f} min')
-    m4.metric('Nb mesures',   f'{len(df0)}')
+    with st.container(border=True):
+        m1, m2, m3, m4 = st.columns(4)
+        m1.metric('Date',         res_csv['date'])
+        m2.metric('Heure début',  res_csv['heure'])
+        m3.metric('Durée totale', f'{duree_tot:.1f} min')
+        m4.metric('Nb mesures',   f'{len(df0)}')
 
     calibr0  = res_csv['calibration']
     pm_cal0  = calibr0[2] if len(calibr0) > 2 and calibr0[2] != 0 else 0.77
@@ -551,110 +645,118 @@ st.divider()
 # ─────────────────────────────────────────────────────────────────────
 
 st.subheader('📝 Données du test par phase')
-st.caption('Saisissez les données des trois phases simultanément, puis analysez.')
+st.caption('Un onglet par phase — remplissez puis analysez. '
+           'Le bouton "Analyser les 3 phases" en bas lance les trois à la fois une fois tout rempli.')
 
-col_hp, col_mp, col_bp = st.columns(3)
+tab_hp_in, tab_mp_in, tab_bp_in = st.tabs([
+    f'🔴 HP — {PHASES_LABELS["HP"]}',
+    f'🟡 MP — {PHASES_LABELS["MP"]}',
+    f'🔵 BP — {PHASES_LABELS["BP"]}',
+])
 
-for col, phase in zip([col_hp, col_mp, col_bp], ['HP', 'MP', 'BP']):
+for tab, phase in zip([tab_hp_in, tab_mp_in, tab_bp_in], ['HP', 'MP', 'BP']):
     td = TEST_DEFAULTS[phase]
     s  = PHASE_COLORS[phase]
 
-    with col:
-        st.markdown(
-            f'<div style="background:{s["fill"]};border-left:4px solid {s["border"]};'
-            f'padding:6px 10px;border-radius:4px;font-weight:700;font-size:1.05em;">'
-            f'{phase} — {PHASES_LABELS[phase]}</div>',
-            unsafe_allow_html=True,
-        )
-        st.markdown('')
-
+    with tab:
         # ── Horodatage terrain ─────────────────────────────────────
         st.markdown('**Horodatage terrain**')
         h_col1, h_col2 = st.columns(2)
         h_col1.time_input('Heure début', value=datetime.time(8, 0),  key=f'h_debut_{phase}')
         h_col2.time_input('Heure fin',   value=datetime.time(9, 0),  key=f'h_fin_{phase}')
 
-        # ── Données initiales ──────────────────────────────────────
-        st.markdown('**Pesées et températures initiales**')
-        mb = st.number_input(
-            'Bois chargé dans le foyer (kg)',
-            help='Masse de bois pesée AVANT la phase et mise dans le foyer.',
-            min_value=0.0,
-            value=float(td['mb'] if mode_test else 1.0),
-            step=0.01, format='%.3f',
-            key=f'mb_{phase}',
-        )
-        k_me = f'me_{phase}'
-        if k_me not in st.session_state:
-            st.session_state[k_me] = float(td['me'] * td['np'] if mode_test else 2.0)
-        st.number_input(
-            'Eau totale dans les pots (kg)',
-            help='Masse totale d\'eau mise dans tous les pots au début de la phase.',
-            min_value=0.1, step=0.1, format='%.1f',
-            key=k_me,
-        )
-        k_t0 = f'td_{phase}'
-        if k_t0 not in st.session_state:
-            st.session_state[k_t0] = float(td['td'] if mode_test else 20.0)
-        st.number_input(
-            'T° eau initiale (°C)',
-            help='Température de l\'eau mesurée au DÉBUT de la phase.',
-            step=0.5, format='%.1f',
-            key=k_t0,
-        )
+        st.markdown('')
+        col_init, col_final = st.columns(2)
 
-        st.markdown('**Pesées et températures finales**')
-        mc = st.number_input(
-            'Charbon résiduel dans le foyer (kg)',
-            help='Masse de charbon restant dans le foyer à la FIN de la phase. '
-                 'Le combustible brûlé = bois chargé − charbon résiduel (calculé automatiquement).',
-            min_value=0.0,
-            value=float(td['mc'] if mode_test else 0.0),
-            step=0.001, format='%.3f',
-            key=f'mc_{phase}',
-        )
-        k_tf = f'tf_{phase}'
-        if k_tf not in st.session_state:
-            st.session_state[k_tf] = float(td['tf'] if mode_test else 90.0)
-        st.number_input(
-            'T° eau finale (°C)',
-            help='Température de l\'eau mesurée à la FIN de la phase.',
-            step=0.5, format='%.1f',
-            key=k_tf,
-        )
+        with col_init:
+            # ── Données initiales ──────────────────────────────────────
+            st.markdown('**Pesées et températures initiales**')
+            mb = st.number_input(
+                'Combustible chargé en début de phase (kg)',
+                help='Masse de combustible pesée AVANT la phase et mise dans le foyer '
+                     '(bois, charbon de bois, etc. selon le combustible choisi ci-dessus).',
+                min_value=0.0,
+                value=float(td['mb'] if mode_test else 1.0),
+                step=0.01, format='%.3f',
+                key=f'mb_{phase}',
+            )
+            k_me = f'me_{phase}'
+            if k_me not in st.session_state:
+                st.session_state[k_me] = float(td['me'] * td['np'] if mode_test else 2.0)
+            st.number_input(
+                'Eau totale dans les pots (kg)',
+                help='Masse totale d\'eau mise dans tous les pots au début de la phase.',
+                min_value=0.1, step=0.1, format='%.1f',
+                key=k_me,
+            )
+            k_t0 = f'td_{phase}'
+            if k_t0 not in st.session_state:
+                st.session_state[k_t0] = float(td['td'] if mode_test else 20.0)
+            st.number_input(
+                'T° eau initiale (°C)',
+                help='Température de l\'eau mesurée au DÉBUT de la phase.',
+                step=0.5, format='%.1f',
+                key=k_t0,
+            )
+
+        with col_final:
+            # ── Données finales ──────────────────────────────────────
+            st.markdown('**Pesées et températures finales**')
+            mc = st.number_input(
+                'Résidu combustible en fin de phase (kg)',
+                help='Masse de combustible non brûlé restant dans le foyer à la FIN de la phase '
+                     '(charbon de bois résiduel pour un test au bois, combustible non consommé sinon). '
+                     'Le combustible brûlé = chargé en début − résidu en fin (calculé automatiquement).',
+                min_value=0.0,
+                value=float(td['mc'] if mode_test else 0.0),
+                step=0.001, format='%.3f',
+                key=f'mc_{phase}',
+            )
+            k_tf = f'tf_{phase}'
+            if k_tf not in st.session_state:
+                st.session_state[k_tf] = float(td['tf'] if mode_test else 90.0)
+            st.number_input(
+                'T° eau finale (°C)',
+                help='Température de l\'eau mesurée à la FIN de la phase.',
+                step=0.5, format='%.1f',
+                key=k_tf,
+            )
 
         # Afficher le combustible brûlé calculé
         mb_val = st.session_state.get(f'mb_{phase}', 0.0)
         mc_val = st.session_state.get(f'mc_{phase}', 0.0)
         brule  = max(0.0, mb_val - mc_val)
-        st.caption(f'→ Combustible brûlé estimé : **{brule:.3f} kg** (bois chargé − charbon résiduel)')
+        st.caption(f'→ Combustible brûlé estimé : **{brule:.3f} kg** (chargé en début − résidu en fin)')
 
-        # ── Données par pot (optionnel) ────────────────────────────
-        with st.expander('🪣 Données par pot (optionnel)'):
-            n_pots_val = st.number_input(
-                'Nombre de pots', min_value=1, max_value=6,
-                value=4, step=1, key=f'npots_{phase}',
-            )
-            n_pots_int = int(n_pots_val)
-            for _ip in range(1, n_pots_int + 1):
-                st.caption(f'Pot {_ip}')
-                _pa, _pb = st.columns(2)
-                _pa.number_input(f'Poids vide P{_ip} (kg)',    min_value=0.0, value=1.0,  step=0.001, format='%.3f', key=f'pot_{phase}_{_ip}_vide')
-                _pb.number_input(f'P{_ip}+eau début (kg)',     min_value=0.0, value=3.5,  step=0.001, format='%.3f', key=f'pot_{phase}_{_ip}_eau_debut')
-                _pc, _pd = st.columns(2)
-                _pc.number_input(f'T° eau début P{_ip} (°C)', value=20.0, step=0.5, format='%.1f', key=f'pot_{phase}_{_ip}_td')
-                _pd.number_input(f'P{_ip}+eau fin (kg)',       min_value=0.0, value=3.2,  step=0.001, format='%.3f', key=f'pot_{phase}_{_ip}_eau_fin')
-                st.number_input(f'T° eau fin P{_ip} (°C)',    value=95.0, step=0.5, format='%.1f', key=f'pot_{phase}_{_ip}_tf')
+        col_pot, col_filtre = st.columns(2)
+        with col_pot:
+            # ── Données par pot (optionnel) ────────────────────────────
+            with st.expander('🪣 Données par pot (optionnel)'):
+                n_pots_val = st.number_input(
+                    'Nombre de pots', min_value=1, max_value=6,
+                    value=4, step=1, key=f'npots_{phase}',
+                )
+                n_pots_int = int(n_pots_val)
+                for _ip in range(1, n_pots_int + 1):
+                    st.caption(f'Pot {_ip}')
+                    _pa, _pb = st.columns(2)
+                    _pa.number_input(f'Poids vide P{_ip} (kg)',    min_value=0.0, value=1.0,  step=0.001, format='%.3f', key=f'pot_{phase}_{_ip}_vide')
+                    _pb.number_input(f'P{_ip}+eau début (kg)',     min_value=0.0, value=3.5,  step=0.001, format='%.3f', key=f'pot_{phase}_{_ip}_eau_debut')
+                    _pc, _pd = st.columns(2)
+                    _pc.number_input(f'T° eau début P{_ip} (°C)', value=20.0, step=0.5, format='%.1f', key=f'pot_{phase}_{_ip}_td')
+                    _pd.number_input(f'P{_ip}+eau fin (kg)',       min_value=0.0, value=3.2,  step=0.001, format='%.3f', key=f'pot_{phase}_{_ip}_eau_fin')
+                    st.number_input(f'T° eau fin P{_ip} (°C)',    value=95.0, step=0.5, format='%.1f', key=f'pot_{phase}_{_ip}_tf')
 
-        # ── Filtre PM optionnel ────────────────────────────────────
-        with st.expander('⚖️ Filtre PM2.5 (optionnel)'):
-            f1, f2 = st.columns(2)
-            filtre_avant = f1.number_input('Avant (mg)', min_value=0.0,
-                                            value=0.0, step=0.001, format='%.3f',
-                                            key=f'fa_{phase}')
-            filtre_apres = f2.number_input('Après (mg)', min_value=0.0,
-                                            value=0.0, step=0.001, format='%.3f',
-                                            key=f'fp_{phase}')
+        with col_filtre:
+            # ── Filtre PM optionnel ────────────────────────────────────
+            with st.expander('⚖️ Filtre PM2.5 (optionnel)'):
+                f1, f2 = st.columns(2)
+                filtre_avant = f1.number_input('Avant (mg)', min_value=0.0,
+                                                value=0.0, step=0.001, format='%.3f',
+                                                key=f'fa_{phase}')
+                filtre_apres = f2.number_input('Après (mg)', min_value=0.0,
+                                                value=0.0, step=0.001, format='%.3f',
+                                                key=f'fp_{phase}')
 
         st.markdown('')
 
@@ -773,7 +875,9 @@ LIGNES_DEF = [
     ('Combustible sec brûlé',            'g',      lambda r: r['thermique']['bois_brule_sec_kg'] * 1000),
     ('Humidité combustible',             '%',      lambda r: r['thermique'].get('humidite_pct', None)),
     ('Efficacité thermique (s/charbon)', '%',      lambda r: r['thermique']['efficacite_sans_char_pct']),
-    ('Efficacité thermique (a/charbon)', '%',      lambda r: r['thermique']['efficacite_avec_char_pct']),
+    ('Efficacité thermique (a/charbon)', '%',      lambda r: (
+        r['thermique']['efficacite_avec_char_pct']
+        if r['thermique'].get('a_residu_charbonneux') else None)),
     ('Taux de combustion (sec)',         'g/min',  lambda r: r['thermique']['taux_combustion_g_min']),
     ('Puissance feu',                    'W',      lambda r: r['thermique']['puissance_feu_kW'] * 1000),
     ('Puissance cuisson',                'W',      lambda r: r['thermique']['puissance_cuis_kW'] * 1000),
@@ -881,8 +985,8 @@ with tab_global:
 
         # ── Bandeau Tier global ───────────────────────────────────────
         st.markdown(
-            f'<div style="background:{bg};border-left:6px solid {col};'
-            f'padding:14px 20px;border-radius:6px;margin-bottom:12px;">'
+            f'<div class="tier-banner" style="background:{bg};border-left:6px solid {col};'
+            f'padding:14px 20px;margin-bottom:12px;">'
             f'<span style="font-size:1.5em;font-weight:700;color:{col};">'
             f'{TIER_EMOJI[tier_global]} Tier {tier_global} — {TIER_LABEL[tier_global]}</span><br>'
             f'<span style="color:#555;font-size:0.95em;">'
@@ -1030,7 +1134,15 @@ with tab_global:
 
         # ── Interprétation narrative ──────────────────────────────────
         st.subheader('📝 Interprétation des résultats')
-        st.markdown(generer_texte(analyses, nom_fichier))
+        st.markdown(generer_texte(
+            analyses, nom_fichier,
+            nom_testeur  = st.session_state.get('nom_testeur', ''),
+            nom_fourneau = st.session_state.get('nom_fourneau', ''),
+            date_test    = st.session_state.get('date_test', ''),
+            lieu_test    = st.session_state.get('lieu_test', ''),
+            n_replique   = st.session_state.get('n_replique', None),
+            remarques    = st.session_state.get('remarques', ''),
+        ))
 
         st.divider()
 
@@ -1070,6 +1182,25 @@ with tab_global:
         with col_xls:
             buffer = io.BytesIO()
             with pd.ExcelWriter(buffer, engine='openpyxl') as writer:
+                # Feuille identification
+                id_data = {
+                    'Champ': [
+                        'Fourneau / poêle', 'N° de réplique', 'Testeur(s)',
+                        'Date du test', 'Lieu', 'Remarques',
+                        'Fichier CSV',
+                    ],
+                    'Valeur': [
+                        st.session_state.get('nom_fourneau', ''),
+                        str(st.session_state.get('n_replique', '')),
+                        st.session_state.get('nom_testeur', ''),
+                        st.session_state.get('date_test', ''),
+                        st.session_state.get('lieu_test', ''),
+                        st.session_state.get('remarques', ''),
+                        nom_fichier,
+                    ],
+                }
+                pd.DataFrame(id_data).to_excel(writer, sheet_name='Identification', index=False)
+
                 for code in ['HP', 'MP', 'BP']:
                     r = phases_ok.get(code)
                     if not r:
