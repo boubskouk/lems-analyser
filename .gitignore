@@ -3,7 +3,7 @@ __pycache__/
 *.pyo
 .env
 *.csv
-!application/csv/T1_foyer_kevin.csv
+!csv/T1_foyer_kevin.csv
 *.xlsx
 *.pdf
 *.docx
@@ -20,3 +20,13 @@ __pycache__/
 NTUSER*
 ntuser*
 desktop.ini
+
+# VS Code
+.vscode/
+
+# Claude
+.claude/
+
+# Fichiers temporaires
+*.tmp
+*.bak
