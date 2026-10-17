@@ -1,0 +1,28 @@
+flowchart LR
+    Operateur(["Opérateur de laboratoire"])
+
+    UC1(["Importer un CSV"])
+    UC2(["Utiliser le mode test"])
+    UC3(["Délimiter les phases"])
+    UC4(["Saisir les données d'essai"])
+    UC5(["Analyser une phase"])
+    UC6(["Consulter les graphiques"])
+    UC7(["Générer le rapport global"])
+    UC8(["Accumuler des tests"])
+    UC9(["Exporter en PDF / Excel"])
+
+    Operateur --- UC1
+    Operateur --- UC2
+    Operateur --- UC3
+    Operateur --- UC4
+    Operateur --- UC5
+    Operateur --- UC6
+    Operateur --- UC7
+    Operateur --- UC8
+    Operateur --- UC9
+
+    classDef acteur fill:#ffffff,color:#1a202c,stroke:#2d3748,stroke-width:1.5px;
+    classDef cas fill:#ebf8ff,color:#1a202c,stroke:#2b6cb0,stroke-width:1px;
+
+    class Operateur acteur;
+    class UC1,UC2,UC3,UC4,UC5,UC6,UC7,UC8,UC9 cas;

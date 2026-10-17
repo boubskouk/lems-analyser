@@ -1,0 +1,32 @@
+%%{init: {'theme': 'base', 'themeVariables': {
+    'actorBkg': '#edf2f7', 'actorBorder': '#4a5568', 'actorTextColor': '#1a202c',
+    'actorLineColor': '#4a5568', 'signalColor': '#1a202c', 'signalTextColor': '#1a202c',
+    'labelBoxBkgColor': '#edf2f7', 'labelBoxBorderColor': '#4a5568', 'labelTextColor': '#1a202c',
+    'activationBkgColor': '#ebf8ff', 'activationBorderColor': '#2b6cb0',
+    'sequenceNumberColor': '#1a202c', 'noteBkgColor': '#ffffff', 'noteBorderColor': '#4a5568'
+}}}%%
+sequenceDiagram
+    actor Operateur as Opérateur
+    participant App as app.py
+    participant Import as import_csv.py
+    participant Calc as calculs.py
+    participant Interp as interpretation.py
+
+    Operateur->>App: Importe un CSV (ou Mode test)
+    App->>Import: lire_csv(chemin)
+    Import-->>App: métadonnées + DataFrame brut
+
+    Operateur->>App: Ajuste l'intervalle de phase, saisit les données externes
+    Operateur->>App: Clique « Analyser »
+
+    App->>Calc: analyser(resultat_csv, donnees_ext)
+    activate Calc
+    Calc->>Calc: appliquer_calibration()
+    Calc->>Calc: calculer_taux_emission()
+    Calc-->>App: métriques, émissions, Tier
+    deactivate Calc
+
+    App->>Interp: analyser_phase(code, resultat)
+    Interp-->>App: texte interprété, Tier commenté
+
+    App-->>Operateur: Affiche résultats et graphiques de la phase

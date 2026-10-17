@@ -14,7 +14,7 @@ import time
 
 import streamlit as st
 
-from ui import logo_data_uri
+import ui
 
 _ALGO = 'pbkdf2_sha256'
 _ITERATIONS = 260_000
@@ -62,65 +62,66 @@ def require_login():
     if st.session_state.get('auth_ok'):
         return
 
-    logo = logo_data_uri()
-    badge_html = f'<img class="lems-login-logo" src="{logo}" alt="CERER">' if logo else ''
-    st.markdown(
-        '<div class="lems-login-wrap">'
-        '  <div class="lems-login-brand">'
-        f'    <div class="lems-login-badge">{badge_html}</div>'
-        '    <div class="lems-login-title">LEMS Analyser</div>'
-        '    <div class="lems-login-subtitle">Laboratoire biomasse-énergie · CERER · UCAD</div>'
-        '    <p class="lems-login-desc">'
-        '      Outil informatique d\'automatisation du traitement et de la visualisation '
-        '      des données d\'émissions issues du dispositif LEMS (Laboratory Emissions '
-        '      Monitoring System) du laboratoire de biomasse-énergie du CERER'
-        '    </p>'
-        '    <p class="lems-login-norme">'
-        '      Conforme à la norme ISO 19867-1 : calibration des capteurs, métriques '
-        '      thermiques, émissions de CO et de PM2,5, classement Tier ISO/IWA-11.'
-        '    </p>'
-        '  </div>'
-        '</div>',
-        unsafe_allow_html=True,
-    )
+    with st.container(key='lems_login_row'):
+        col_gauche, col_droite = st.columns([1.15, 1], gap='large')
 
-    _, col_card, _ = st.columns([1, 1.1, 1])
-    with col_card:
-        st.markdown('<div class="lems-login-card">', unsafe_allow_html=True)
-        st.markdown('#### Connexion')
+        with col_gauche:
+            badge_html = ui.logo_img_tag(56, css_class='lems-login-logo')
+            st.markdown(
+                '<div class="lems-login-brand">'
+                f'  <div class="lems-login-badge">{badge_html}</div>'
+                '  <div class="lems-login-title">LEMS Analyser</div>'
+                '  <div class="lems-login-subtitle">Laboratoire biomasse-énergie · CERER · UCAD</div>'
+                '  <p class="lems-login-desc">'
+                '    Outil informatique d\'automatisation du traitement et de la visualisation '
+                '    des données d\'émissions issues du dispositif LEMS (Laboratory Emissions '
+                '    Monitoring System) du laboratoire de biomasse-énergie du CERER'
+                '  </p>'
+                '  <p class="lems-login-norme">'
+                '    Conforme à la norme ISO 19867-1 : calibration des capteurs, métriques '
+                '    thermiques, émissions de CO et de PM2,5, classement Tier ISO/IWA-11.'
+                '  </p>'
+                '</div>',
+                unsafe_allow_html=True,
+            )
 
-        reste = _blocage_restant()
-        if reste > 0:
-            st.error(f"Accès bloqué après {_MAX_ECHECS} échecs. "
-                     f"Réessayez dans {int(reste) + 1} seconde(s).")
-        else:
-            with st.form('login_form'):
-                identifiant = st.text_input('Identifiant', key='login_identifiant').strip().lower()
-                mot_de_passe = st.text_input('Mot de passe', type='password', key='login_mdp')
-                submitted = st.form_submit_button('Se connecter', use_container_width=True)
+        with col_droite:
+            with st.container(border=True):
+                st.markdown('#### Connexion')
+                st.caption('Accès réservé aux équipes du laboratoire.')
 
-            if submitted:
-                users = st.secrets.get('users', {})
-                user = users.get(identifiant)
-                if user is not None and verify_password(mot_de_passe, user.get('password_hash', '')):
-                    st.session_state.auth_ok = True
-                    st.session_state.auth_user = identifiant
-                    st.session_state.auth_name = user.get('name', identifiant)
-                    st.session_state.auth_role = user.get('role', 'utilisateur')
-                    st.session_state.pop('auth_echecs', None)
-                    st.session_state.pop('auth_bloque_jusqu', None)
-                    st.rerun()
+                reste = _blocage_restant()
+                if reste > 0:
+                    st.error(f"Accès bloqué après {_MAX_ECHECS} échecs. "
+                             f"Réessayez dans {int(reste) + 1} seconde(s).")
                 else:
-                    echecs = st.session_state.get('auth_echecs', 0) + 1
-                    st.session_state.auth_echecs = echecs
-                    if echecs >= _MAX_ECHECS:
-                        st.session_state.auth_bloque_jusqu = time.time() + _BLOCAGE_S
-                        st.error(f"Accès bloqué après {_MAX_ECHECS} échecs. "
-                                 f"Réessayez dans {_BLOCAGE_S} seconde(s).")
-                    else:
-                        st.error('Identifiant ou mot de passe incorrect.')
+                    with st.form('login_form'):
+                        identifiant = st.text_input('Identifiant', key='login_identifiant').strip().lower()
+                        mot_de_passe = st.text_input('Mot de passe', type='password', key='login_mdp')
+                        submitted = st.form_submit_button('Se connecter', type='primary',
+                                                           use_container_width=True)
 
-        st.caption(f"Après {_MAX_ECHECS} échecs, l'accès est bloqué {_BLOCAGE_S} secondes.")
-        st.markdown('</div>', unsafe_allow_html=True)
+                    if submitted:
+                        users = st.secrets.get('users', {})
+                        user = users.get(identifiant)
+                        if user is not None and verify_password(mot_de_passe, user.get('password_hash', '')):
+                            st.session_state.auth_ok = True
+                            st.session_state.auth_user = identifiant
+                            st.session_state.auth_name = user.get('name', identifiant)
+                            st.session_state.auth_role = user.get('role', 'utilisateur')
+                            st.session_state.pop('auth_echecs', None)
+                            st.session_state.pop('auth_bloque_jusqu', None)
+                            st.rerun()
+                        else:
+                            echecs = st.session_state.get('auth_echecs', 0) + 1
+                            st.session_state.auth_echecs = echecs
+                            if echecs >= _MAX_ECHECS:
+                                st.session_state.auth_bloque_jusqu = time.time() + _BLOCAGE_S
+                                st.error(f"Accès bloqué après {_MAX_ECHECS} échecs. "
+                                         f"Réessayez dans {_BLOCAGE_S} seconde(s).")
+                            else:
+                                st.error('Identifiant ou mot de passe incorrect.')
+
+                st.caption(f"Après {_MAX_ECHECS} échecs, l'accès est bloqué {_BLOCAGE_S} secondes.")
 
     st.stop()

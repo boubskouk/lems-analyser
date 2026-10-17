@@ -9,6 +9,7 @@ __pycache__/
 !csv/15-01-2026-MauvaisFourneau-T1.csv
 *.xlsx
 *.pdf
+!docs/modele_rapport_essai_LEMS.pdf
 *.docx
 *.zip
 *.lnk

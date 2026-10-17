@@ -9,7 +9,7 @@ Aucune des fonctions de calculs.py / interpretation.py / import_csv.py
 n'est modifiée — seule l'orchestration de l'interface change.
 """
 
-import io, os, tempfile, datetime
+import datetime, io, os, tempfile
 import numpy as np
 import pandas as pd
 import streamlit as st
@@ -20,8 +20,10 @@ from calculs import (analyser, COMBUSTIBLES,
                      appliquer_calibration, calculer_taux_emission)
 from visualisation import graphique_comparaison_calibration, tableau_calibration_df
 from interpretation import (analyser_phase, generer_texte, generer_recommandations,
-                             generer_pdf, TIER_COUL, TIER_BG, TIER_LABEL,
+                             TIER_COUL, TIER_BG, TIER_LABEL,
                              SEUILS_CO_G_MJD)
+import rapport_pdf
+import report_counter
 
 import ui
 import auth
@@ -36,8 +38,7 @@ ui.inject_style()
 auth.require_login()
 ui.render_header()
 
-CSV_TEST       = os.path.join(os.path.dirname(__file__), 'csv', '01-12-2022-Sakkanal-T11.csv')
-DOSSIER_DEFAUT = r'C:\Emissions-Output'
+CSV_TEST = os.path.join(os.path.dirname(__file__), 'csv', '01-12-2022-Sakkanal-T11.csv')
 
 PHASES_LABELS = {'HP': 'Haute Puissance', 'MP': 'Moyenne Puissance', 'BP': 'Basse Puissance'}
 PHASE_COLORS  = {
@@ -82,15 +83,6 @@ def lire_upload(fichier):
         os.unlink(chemin)
 
 
-def lister_csv(dossier):
-    try:
-        fichiers = [f for f in os.listdir(dossier) if f.lower().endswith('.csv')]
-        fichiers.sort(key=lambda f: os.path.getmtime(os.path.join(dossier, f)), reverse=True)
-        return fichiers
-    except Exception:
-        return []
-
-
 def estimer_fond(df_full):
     n = len(df_full)
     i_bg0 = max(0, n // 20)
@@ -110,7 +102,7 @@ def _reset_test_data():
     for p in ('HP', 'MP', 'BP'):
         st.session_state.pop(f'intervalle_{p}', None)
         for kk in (f'mb_{p}', f'mc_{p}', f'me_{p}', f'td_{p}', f'tf_{p}',
-                   f'fa_{p}', f'fp_{p}', f'h_debut_{p}', f'h_fin_{p}'):
+                   f'fa_{p}', f'fp_{p}'):
             st.session_state.pop(kk, None)
     st.session_state.resultats = {}
 
@@ -120,6 +112,7 @@ def render_sidebar_donnees_communes():
         s = st.session_state.serie
         st.header('Série en cours')
         st.caption(f"{s.get('foyer', '')} · {s.get('protocole', '')}")
+        st.markdown(f"**Test {st.session_state.get('test_n', 1)} sur {s.get('nb_tests', 1)}**")
 
         with st.expander('Données communes', expanded=False):
             liste_comb = list(COMBUSTIBLES.keys())
@@ -133,7 +126,7 @@ def render_sidebar_donnees_communes():
             s['T_atm'] = st.number_input('Température ambiante (°C)', value=float(s.get('T_atm', 29.0)),
                                           step=0.5, format='%.1f', key='sb_ta')
             s['pression'] = st.number_input('Pression atmosphérique (hPa)', value=float(s.get('pression', 1012.0)),
-                                             step=1.0, format='%.1f', key='sb_pr')
+                                             step=1.0, format='%.0f', key='sb_pr')
             s['nombre_pots'] = st.number_input('Nombre de pots', min_value=1, max_value=6,
                                                 value=int(s.get('nombre_pots', 4)), step=1, key='sb_npots')
             s['eau_par_pot_kg'] = st.number_input('Eau par pot (kg)', value=float(s.get('eau_par_pot_kg', 2.5)),
@@ -141,12 +134,14 @@ def render_sidebar_donnees_communes():
 
         st.divider()
         st.caption('Statut des phases du test en cours')
-        cols_stat = st.columns(3)
-        for i, p in enumerate(('HP', 'MP', 'BP')):
-            if p in st.session_state.resultats:
-                cols_stat[i].success(p)
+        for p in ('HP', 'MP', 'BP'):
+            res_p = st.session_state.resultats.get(p)
+            if res_p is not None:
+                badge = f'<span class="lems-badge-ok">Analysée · Tier {res_p["tier"]}</span>'
             else:
-                cols_stat[i].caption(p)
+                badge = '<span class="lems-badge-todo">À faire</span>'
+            st.markdown(f'<div style="margin-bottom:6px;"><strong>{p}</strong> {badge}</div>',
+                        unsafe_allow_html=True)
 
         st.divider()
         if st.button('Nouvelle série', use_container_width=True, key='btn_nouvelle_serie'):
@@ -232,9 +227,106 @@ def _enregistrer_test_courant(tier_global, analyses):
     st.session_state.tests_accumules.append(entree)
 
 
+def _get_id(cle, defaut=''):
+    return st.session_state.get(f'id_{cle}', defaut)
+
+
+def _construire_contexte_rapport():
+    """Assemble le contexte passé à rapport_pdf.generer_rapport_test / _serie :
+    champs saisis par l'utilisateur (étape 1 'Identification de l'essai' + champs
+    optionnels de l'étape 5) et champs automatiques (n° de rapport, date/heure de
+    génération, version de l'application, utilisateur connecté, métadonnées CSV)."""
+    res_csv = st.session_state.get('current_csv')
+    df0 = res_csv['donnees'] if res_csv else None
+    n_mesures = None
+    freq_hz = None
+    duree_totale_min = None
+    if df0 is not None and len(df0) > 1:
+        duree_s_tot = float(df0['seconds'].max() - df0['seconds'].min())
+        n_mesures = len(df0)
+        duree_totale_min = duree_s_tot / 60.0
+        intervalle_s = duree_s_tot / (n_mesures - 1)
+        freq_hz = round(1.0 / intervalle_s, 1) if intervalle_s > 0 else None
+
+    s = st.session_state.serie
+    cle_meta = f'rapport_meta_test_{st.session_state.test_n}'
+    if cle_meta not in st.session_state:
+        st.session_state[cle_meta] = {
+            'numero'   : report_counter.numero_rapport_suivant(),
+            'genere_le': datetime.datetime.now(),
+        }
+    meta = st.session_state[cle_meta]
+
+    return {
+        'numero_rapport': meta['numero'],
+        'date_emission' : meta['genere_le'].date(),
+        'genere_le'     : meta['genere_le'],
+        'auth_name'     : st.session_state.get('auth_name', ''),
+
+        'demandeur_raison_sociale'  : _get_id('demandeur_raison_sociale'),
+        'demandeur_adresse'         : _get_id('demandeur_adresse'),
+        'demandeur_contact_nom'     : _get_id('demandeur_contact_nom'),
+        'demandeur_contact_fonction': _get_id('demandeur_contact_fonction'),
+        'demandeur_contact_tel'     : _get_id('demandeur_contact_tel'),
+        'demandeur_contact_courriel': _get_id('demandeur_contact_courriel'),
+        'demandeur_reference'       : _get_id('demandeur_reference'),
+
+        'foyer_nom'           : s.get('foyer', ''),
+        'foyer_fabricant'     : _get_id('foyer_fabricant'),
+        'foyer_modele'        : _get_id('foyer_modele'),
+        'foyer_numero_serie'  : _get_id('foyer_numero_serie'),
+        'foyer_type'          : _get_id('foyer_type'),
+        'foyer_date_reception': _get_id('foyer_date_reception'),
+
+        'type_combustible': s.get('type_combustible', ''),
+        'humidite_pct'    : s.get('humidite_pct'),
+        'nombre_pots'     : s.get('nombre_pots'),
+        'eau_par_pot_kg'  : s.get('eau_par_pot_kg'),
+
+        'date_essai_iso'    : res_csv['date'] if res_csv else None,
+        'heure_debut_hms'   : res_csv['heure'] if res_csv else None,
+        'duree_totale_min'  : duree_totale_min,
+        'n_mesures'         : n_mesures,
+        'freq_hz'           : freq_hz,
+
+        'lieu_essai'             : st.session_state.get('lieu_test', ''),
+        'T_atm'                  : s.get('T_atm'),
+        'pression'               : s.get('pression'),
+        'humidite_relative_pct'  : st.session_state.get('id_humidite_relative_pct'),
+
+        'operateur_nom'         : _get_id('operateur_nom'),
+        'operateur_fonction'    : _get_id('operateur_fonction'),
+        'verificateur_nom'      : _get_id('verificateur_nom'),
+        'verificateur_fonction' : _get_id('verificateur_fonction'),
+        'approbateur_nom'       : _get_id('approbateur_nom'),
+        'approbateur_fonction'  : _get_id('approbateur_fonction'),
+
+        'equipement_numero_serie': _get_id('equipement_numero_serie'),
+        'derniere_calibration'   : _get_id('derniere_calibration'),
+
+        'nom_fichier': st.session_state.get('current_csv_name', ''),
+        'test_n'     : st.session_state.test_n,
+        'nb_tests'   : s.get('nb_tests', 1),
+
+        'observations_operateur': st.session_state.get('observations_operateur', ''),
+    }
+
+
 # ─────────────────────────────────────────────────────────────────────
 # Étape 1 — Nouvelle série d'essais
 # ─────────────────────────────────────────────────────────────────────
+
+def _appliquer_demo_serie1():
+    if st.session_state.get('f1_demo'):
+        st.session_state['f1_foyer'] = 'Sakkanal-T11'
+        st.session_state['f1_tc'] = 'Bois dur moyen'
+        st.session_state['f1_hc'] = 12.0
+        st.session_state['f1_npots'] = 4
+        st.session_state['f1_eau'] = 2.5
+        st.session_state['f1_ta'] = 29.0
+        st.session_state['f1_pr'] = 1012.0
+        st.session_state['id_foyer_type'] = 'Foyer à bois'
+
 
 def etape_1_serie():
     st.subheader("Nouvelle série d'essais")
@@ -246,6 +338,12 @@ def etape_1_serie():
     with st.container(border=True):
         foyer = st.text_input('Foyer testé', value=st.session_state.serie.get('foyer', ''),
                                placeholder='ex. Sakkanal-T11', key='f1_foyer')
+        if not foyer.strip():
+            st.markdown(
+                '<p style="color:#9B2C1C;font-size:0.85rem;margin:-10px 0 6px 0;">'
+                'Indiquez le foyer testé pour démarrer la série.</p>',
+                unsafe_allow_html=True,
+            )
         st.selectbox('Protocole', ['WBT ISO 19867-1'], index=0, key='f1_protocole', disabled=True)
 
         st.markdown('**Nombre de tests**')
@@ -261,7 +359,17 @@ def etape_1_serie():
 
         st.markdown('')
         demo = st.checkbox('Utiliser le jeu de démonstration (Sakkanal-T11)',
-                            value=st.session_state.serie.get('demo', False), key='f1_demo')
+                            value=st.session_state.serie.get('demo', False),
+                            key='f1_demo', on_change=_appliquer_demo_serie1)
+
+        msg_avertissement_f1 = '<p style="color:#7A5A12;font-size:0.82rem;margin:4px 0 0 0;">⚠ {}</p>'
+
+        def _avertir_hors_plage_f1(valeur, lo, hi, libelle):
+            if valeur is not None and not (lo <= valeur <= hi):
+                st.markdown(msg_avertissement_f1.format(
+                    f'Valeur inhabituelle pour « {libelle} » (plage attendue {lo}–{hi}). '
+                    f'Vérifiez la saisie — ce n\'est pas bloquant.'),
+                    unsafe_allow_html=True)
 
         st.markdown('**Données communes**')
         c1, c2, c3 = st.columns(3)
@@ -269,15 +377,26 @@ def etape_1_serie():
             liste_comb = list(COMBUSTIBLES.keys())
             type_comb = st.selectbox('Type de combustible', liste_comb, index=0, key='f1_tc')
             hum_comb = st.number_input('Humidité combustible (%)', min_value=0.0, max_value=100.0,
-                                        value=12.0 if demo else 6.0, step=0.5, format='%.1f', key='f1_hc')
+                                        value=(12.0 if demo else None), step=0.5, format='%.1f', key='f1_hc')
+            if not demo:
+                st.caption("Mesurée en laboratoire ; laissez vide si inconnue.")
+            _avertir_hors_plage_f1(hum_comb, 3.0, 30.0, 'humidité combustible (%)')
         with c2:
-            T_atm = st.number_input('Température ambiante (°C)', value=29.0, step=0.5,
+            T_atm = st.number_input('Température ambiante (°C)',
+                                     value=(29.0 if demo else None), step=0.5,
                                      format='%.1f', key='f1_ta')
-            pression = st.number_input('Pression atmosphérique (hPa)', value=1012.0, step=1.0,
-                                        format='%.1f', key='f1_pr')
+            if not demo:
+                st.caption("Relevée sur le site du test.")
+            _avertir_hors_plage_f1(T_atm, 10.0, 45.0, 'température ambiante (°C)')
+            pression = st.number_input('Pression atmosphérique (hPa)',
+                                        value=(1012.0 if demo else None), step=1.0,
+                                        format='%.0f', key='f1_pr')
+            if not demo:
+                st.caption("Pression atmosphérique locale au moment du test.")
+            _avertir_hors_plage_f1(pression, 900.0, 1050.0, 'pression atmosphérique (hPa)')
         with c3:
             nombre_pots = st.number_input('Nombre de pots', min_value=1, max_value=6, value=4,
-                                           step=1, key='f1_npots')
+                                           step=1, format='%d', key='f1_npots')
             eau_par_pot = st.number_input('Eau par pot (kg)', value=2.5, step=0.1, format='%.1f',
                                            key='f1_eau')
 
@@ -288,9 +407,50 @@ def etape_1_serie():
             lieu_test = ci2.text_input('Lieu du test', value=st.session_state.get('lieu_test', ''),
                                         placeholder='ex. CERER, Dakar', key='f1_lieu')
 
+        with st.expander("Identification de l'essai (optionnel, pour l'en-tête du rapport PDF)"):
+            st.caption("Ces informations sont conservées pour toute la série et reprises sur "
+                       "chaque page de couverture du rapport PDF.")
+            st.markdown('**Demandeur**')
+            d1, d2 = st.columns(2)
+            d1.text_input('Raison sociale', key='id_demandeur_raison_sociale')
+            d2.text_input('Référence de la demande', key='id_demandeur_reference')
+            d1.text_input('Adresse', key='id_demandeur_adresse')
+            d2.text_input('Contact (nom)', key='id_demandeur_contact_nom')
+            d1.text_input('Contact (fonction)', key='id_demandeur_contact_fonction')
+            d2.text_input('Contact (téléphone)', key='id_demandeur_contact_tel')
+            d1.text_input('Contact (courriel)', key='id_demandeur_contact_courriel')
+
+            st.markdown('**Foyer**')
+            f1c, f2c = st.columns(2)
+            f1c.text_input('Fabricant', key='id_foyer_fabricant')
+            f2c.text_input('Modèle', key='id_foyer_modele')
+            f1c.text_input('N° de série du foyer', key='id_foyer_numero_serie')
+            f2c.text_input('Type de foyer', value=st.session_state.get('id_foyer_type', ''),
+                            placeholder='ex. Foyer à bois', key='id_foyer_type')
+            f1c.text_input('Date de réception (JJ/MM/AAAA)', key='id_foyer_date_reception')
+
+            st.markdown('**Personnel**')
+            p1, p2 = st.columns(2)
+            p1.text_input("Opérateur de l'essai (nom)", key='id_operateur_nom')
+            p2.text_input("Opérateur (fonction)", key='id_operateur_fonction')
+            p1.text_input('Vérificateur (nom)', key='id_verificateur_nom')
+            p2.text_input('Vérificateur (fonction)', key='id_verificateur_fonction')
+            p1.text_input('Approbateur (nom)', key='id_approbateur_nom')
+            p2.text_input('Approbateur (fonction)', key='id_approbateur_fonction')
+
+            st.markdown('**Équipement et conditions ambiantes**')
+            e1, e2 = st.columns(2)
+            e1.text_input('N° de série du LEMS', key='id_equipement_numero_serie')
+            e2.text_input('Dernière calibration (JJ/MM/AAAA)', key='id_derniere_calibration')
+            e1.number_input('Humidité relative ambiante (%)', min_value=0.0, max_value=100.0,
+                             value=None, step=1.0, format='%.0f', key='id_humidite_relative_pct')
+
         st.markdown('')
         nb_tests = st.session_state.get('_nb_tests_choice', 3)
-        disabled = not foyer.strip()
+        valeurs_manquantes = hum_comb is None or T_atm is None or pression is None
+        disabled = not foyer.strip() or valeurs_manquantes
+        if valeurs_manquantes and foyer.strip():
+            st.caption("Renseignez l'humidité, la température ambiante et la pression pour continuer.")
         if st.button(f'Démarrer la série de {nb_tests} tests', type='primary',
                      use_container_width=True, disabled=disabled, key='f1_demarrer'):
             st.session_state.serie = {
@@ -305,8 +465,6 @@ def etape_1_serie():
             st.session_state.test_n = 1
             st.session_state.etape = 2
             st.rerun()
-        if disabled:
-            st.caption('Le nom du foyer testé est obligatoire pour démarrer la série.')
 
 
 # ─────────────────────────────────────────────────────────────────────
@@ -316,61 +474,40 @@ def etape_1_serie():
 def etape_2_fichier():
     st.subheader('Fichier CSV')
     render_sidebar_donnees_communes()
-    ui.render_todo_box(
-        "Importez le fichier CSV du LEMS pour ce test (ou utilisez le jeu de démonstration "
-        "activé à l'étape précédente), puis cliquez sur « Suivant »."
-    )
 
     s = st.session_state.serie
     demo = s.get('demo', False)
     _CSV, _NAME = 'current_csv', 'current_csv_name'
 
+    if demo and _CSV not in st.session_state:
+        try:
+            st.session_state[_CSV]  = lire_csv(CSV_TEST)
+            st.session_state[_NAME] = '01-12-2022-Sakkanal-T11.csv'
+        except Exception as e:
+            st.error(f'Fichier de démonstration introuvable : {e}')
+
+    res_csv = st.session_state.get(_CSV)
+    if res_csv is None:
+        texte_todo = ("Importez le fichier CSV du LEMS pour le test "
+                       f"{st.session_state.get('test_n', 1)}, puis cliquez sur « Suivant ». "
+                       "Ensuite : délimiter les phases HP, MP et BP.")
+    elif demo:
+        texte_todo = ("Le fichier de démonstration Sakkanal-T11 est chargé. "
+                       "Vérifiez la fiche du fichier puis cliquez sur « Suivant ».")
+    else:
+        texte_todo = "Fichier chargé. Vérifiez la date et la durée, puis cliquez sur « Suivant »."
+    ui.render_todo_box(texte_todo)
+
     with st.container(border=True):
-        if demo:
-            if _CSV not in st.session_state:
+        if not demo:
+            uploaded = st.file_uploader('Importer le fichier CSV du test', type=['csv'], key='upload_csv')
+            if uploaded is not None and uploaded.name != st.session_state.get(_NAME):
                 try:
-                    st.session_state[_CSV]  = lire_csv(CSV_TEST)
-                    st.session_state[_NAME] = '01-12-2022-Sakkanal-T11.csv'
+                    st.session_state[_CSV]  = lire_upload(uploaded)
+                    st.session_state[_NAME] = uploaded.name
+                    st.session_state.resultats = {}
                 except Exception as e:
-                    st.error(f'Fichier de démonstration introuvable : {e}')
-            st.info(f"Jeu de démonstration chargé : {st.session_state.get(_NAME, '')}")
-        else:
-            dossier = st.text_input('Dossier des CSV', value=DOSSIER_DEFAUT, key='dossier_csv')
-            csv_list = lister_csv(dossier)
-            if csv_list:
-                prev = st.session_state.get(_NAME, '')
-                default_idx = csv_list.index(prev) if prev in csv_list else 0
-                choix = st.selectbox('Choisir un fichier', csv_list, index=default_idx, key='sel_csv')
-                changement = choix != st.session_state.get(_NAME) and _NAME in st.session_state
-                if changement and st.session_state.resultats:
-                    st.warning(f"Changer de fichier (« {choix} ») effacera les données déjà "
-                               f"saisies pour ce test.")
-                    if st.button('Confirmer le changement de fichier', key='btn_confirme_changement_csv'):
-                        try:
-                            st.session_state[_CSV]  = lire_csv(os.path.join(dossier, choix))
-                            st.session_state[_NAME] = choix
-                            st.session_state.resultats = {}
-                            st.rerun()
-                        except Exception as e:
-                            st.error(f'Erreur lecture : {e}')
-                elif choix != st.session_state.get(_NAME) or _CSV not in st.session_state:
-                    try:
-                        st.session_state[_CSV]  = lire_csv(os.path.join(dossier, choix))
-                        st.session_state[_NAME] = choix
-                    except Exception as e:
-                        st.error(f'Erreur lecture : {e}')
-            else:
-                if os.path.isdir(dossier):
-                    st.warning('Aucun fichier CSV dans ce dossier.')
-                else:
-                    st.warning('Dossier introuvable.')
-                uploaded = st.file_uploader('Charger un CSV manuellement', type=['csv'], key='upload_csv')
-                if uploaded and uploaded.name != st.session_state.get(_NAME):
-                    try:
-                        st.session_state[_CSV]  = lire_upload(uploaded)
-                        st.session_state[_NAME] = uploaded.name
-                    except Exception as e:
-                        st.error(f'Erreur : {e}')
+                    st.error(f'Erreur de lecture du fichier : {e}')
 
         res_csv     = st.session_state.get(_CSV)
         nom_fichier = st.session_state.get(_NAME, '')
@@ -378,7 +515,7 @@ def etape_2_fichier():
         if res_csv is not None:
             df0 = res_csv['donnees']
             duree_tot = (df0['seconds'].max() - df0['seconds'].min()) / 60.0
-            st.markdown(f'**{nom_fichier}**')
+            st.success(f'✓ Fichier chargé — **{nom_fichier}**')
             m1, m2, m3, m4 = st.columns(4)
             m1.metric('Date', res_csv['date'])
             m2.metric('Heure début', res_csv['heure'])
@@ -446,12 +583,17 @@ def etape_3_phases():
     df0, df_cal0, df_taux0, _ = _calculer_df_taux(res_csv, s, bg_pm_raw, bg_co_raw, bg_co2_ppm, baseline_flow)
     t_min = df0['seconds'] / 60.0
     t_min_val, t_max_val = float(t_min.min()), float(t_min.max())
-    duree_tot_min = t_max_val - t_min_val
+    # Bornes arrondies à 1 décimale une seule fois ici, puis réutilisées partout
+    # (min_value/max_value des number_input ET valeurs par défaut) : un mélange de
+    # valeurs brutes et arrondies provoquait un crash StreamlitValueAboveMaxError
+    # quand l'arrondi flottant de t_max_val ne tombait pas du même côté.
+    t_min_r, t_max_r = round(t_min_val, 1), round(t_max_val, 1)
+    duree_tot_min = t_max_r - t_min_r
 
     tiers = [
-        (t_min_val, round(t_min_val + duree_tot_min * 0.37, 1)),
-        (round(t_min_val + duree_tot_min * 0.37, 1), round(t_min_val + duree_tot_min * 0.69, 1)),
-        (round(t_min_val + duree_tot_min * 0.69, 1), t_max_val),
+        (t_min_r, round(t_min_r + duree_tot_min * 0.37, 1)),
+        (round(t_min_r + duree_tot_min * 0.37, 1), round(t_min_r + duree_tot_min * 0.69, 1)),
+        (round(t_min_r + duree_tot_min * 0.69, 1), t_max_r),
     ]
     for idx_p, p in enumerate(('HP', 'MP', 'BP')):
         if f'intervalle_{p}' not in st.session_state:
@@ -491,18 +633,45 @@ def etape_3_phases():
     )
     st.plotly_chart(fig, use_container_width=True)
 
+    for p in ('HP', 'MP', 'BP'):
+        iv = st.session_state[f'intervalle_{p}']
+        if f'deb_{p}' not in st.session_state:
+            st.session_state[f'deb_{p}'] = round(float(iv[0]), 1)
+        if f'fin_{p}' not in st.session_state:
+            st.session_state[f'fin_{p}'] = round(float(iv[1]), 1)
+        # Recadre toute valeur restée en session depuis un CSV précédent (durée
+        # différente) pour qu'elle reste dans les bornes du fichier actuel.
+        st.session_state[f'deb_{p}'] = min(max(st.session_state[f'deb_{p}'], t_min_r), t_max_r)
+        st.session_state[f'fin_{p}'] = min(max(st.session_state[f'fin_{p}'], t_min_r), t_max_r)
+
+    deb_vals = {p: st.session_state[f'deb_{p}'] for p in ('HP', 'MP', 'BP')}
+    fin_vals = {p: st.session_state[f'fin_{p}'] for p in ('HP', 'MP', 'BP')}
+
+    erreurs = {'HP': [], 'MP': [], 'BP': []}
+    for p in ('HP', 'MP', 'BP'):
+        if deb_vals[p] >= fin_vals[p]:
+            erreurs[p].append('Le début doit être inférieur à la fin.')
+    if abs(fin_vals['HP'] - deb_vals['MP']) > 1e-6:
+        erreurs['MP'].append('Le début de MP doit correspondre à la fin de HP.')
+    if abs(fin_vals['MP'] - deb_vals['BP']) > 1e-6:
+        erreurs['BP'].append('Le début de BP doit correspondre à la fin de MP.')
+    if fin_vals['BP'] > t_max_r + 1e-6:
+        erreurs['BP'].append('La fin de BP ne peut pas dépasser la durée totale du fichier.')
+
     st.markdown('**Intervalles des phases (minutes)**')
     cols = st.columns(3)
     for col, p in zip(cols, ('HP', 'MP', 'BP')):
         with col, st.container(border=True):
             st.markdown(ui.phase_label_html(p, f'{p} — {PHASES_LABELS[p]}'), unsafe_allow_html=True)
-            iv = st.session_state[f'intervalle_{p}']
-            deb = st.number_input('Début (min)', min_value=round(t_min_val, 1), max_value=round(t_max_val, 1),
-                                   value=float(iv[0]), step=0.5, format='%.1f', key=f'deb_{p}')
-            fin = st.number_input('Fin (min)', min_value=round(t_min_val, 1), max_value=round(t_max_val, 1),
-                                   value=float(iv[1]), step=0.5, format='%.1f', key=f'fin_{p}')
+            deb = st.number_input('Début (min)', min_value=t_min_r, max_value=t_max_r,
+                                   step=0.5, format='%.1f', key=f'deb_{p}')
+            fin = st.number_input('Fin (min)', min_value=t_min_r, max_value=t_max_r,
+                                   step=0.5, format='%.1f', key=f'fin_{p}')
             st.session_state[f'intervalle_{p}'] = (deb, fin)
             st.caption(f'{max(0.0, fin - deb):.1f} min')
+            for msg in erreurs[p]:
+                st.markdown(f'<p style="color:#9B2C1C;font-size:0.82rem;margin:4px 0 0 0;">{msg}</p>',
+                            unsafe_allow_html=True)
 
     with st.expander('Calibration — données brutes vs calibrées', expanded=False):
         st.caption('Valeurs lues depuis la ligne #0 du CSV · valeur calibrée = valeur brute × facteur')
@@ -510,13 +679,15 @@ def etape_3_phases():
         st.plotly_chart(graphique_comparaison_calibration(df0, df_cal0, res_csv['calibration']),
                         use_container_width=True)
 
-    col_retour, _, col_suivant = st.columns([1, 3, 1])
+    col_retour, col_suivant = st.columns([1, 3])
     with col_retour:
         if st.button('Retour', use_container_width=True, key='btn_retour_3'):
             st.session_state.etape = 2
             st.rerun()
     with col_suivant:
-        if st.button('Valider les intervalles', type='primary', use_container_width=True, key='btn_suivant_3'):
+        intervalles_invalides = any(erreurs[p] for p in erreurs)
+        if st.button('Valider les intervalles', type='primary', use_container_width=True,
+                     disabled=intervalles_invalides, key='btn_suivant_3'):
             st.session_state.etape = 4
             st.rerun()
 
@@ -552,37 +723,68 @@ def _rendre_onglet_phase(phase, res_csv, nom_fichier, type_comb, hum_comb, T_atm
     else:
         st.markdown('<span class="lems-badge-todo">À faire</span>', unsafe_allow_html=True)
     st.markdown('')
+    msg_incoherence = '<p style="color:#9B2C1C;font-size:0.82rem;margin:4px 0 0 0;">{}</p>'
+    msg_avertissement = '<p style="color:#7A5A12;font-size:0.82rem;margin:4px 0 0 0;">⚠ {}</p>'
 
-    st.markdown('**Horodatage terrain**')
-    h1, h2 = st.columns(2)
-    h1.time_input('Heure début', value=datetime.time(8, 0), key=f'h_debut_{phase}')
-    h2.time_input('Heure fin',   value=datetime.time(9, 0), key=f'h_fin_{phase}')
+    def _avertir_hors_plage(valeur, lo, hi, libelle):
+        if valeur is not None and not (lo <= valeur <= hi):
+            st.markdown(msg_avertissement.format(
+                f'Valeur inhabituelle pour « {libelle} » (plage attendue {lo}–{hi}). '
+                f'Vérifiez la saisie — ce n\'est pas bloquant.'),
+                unsafe_allow_html=True)
 
-    st.markdown('')
     col_init, col_final = st.columns(2)
     with col_init:
         st.markdown('**Pesées et températures initiales**')
-        st.number_input('Combustible chargé en début de phase (kg)', min_value=0.0,
-                         value=float(td['mb'] if demo else 1.0), step=0.01, format='%.3f', key=f'mb_{phase}')
-        k_me = f'me_{phase}'
-        if k_me not in st.session_state:
-            st.session_state[k_me] = float(td['me'] * td['np'] if demo else 2.0)
-        st.number_input('Eau totale dans les pots (kg)', min_value=0.1, step=0.1, format='%.1f', key=k_me)
-        k_t0 = f'td_{phase}'
-        if k_t0 not in st.session_state:
-            st.session_state[k_t0] = float(td['td'] if demo else 20.0)
-        st.number_input("T° eau initiale (°C)", step=0.5, format='%.1f', key=k_t0)
+        mb = st.number_input('Combustible chargé en début de phase (kg)', min_value=0.0,
+                              value=(float(td['mb']) if demo else None), step=0.01, format='%.3f', key=f'mb_{phase}')
+        if mb is None:
+            st.caption('Obligatoire : pesée du combustible chargé.')
+        else:
+            _avertir_hors_plage(mb, 0.05, 10.0, 'combustible chargé (kg)')
+        me = st.number_input('Eau totale dans les pots (kg)', min_value=0.1,
+                              value=(float(td['me'] * td['np']) if demo else None),
+                              step=0.1, format='%.1f', key=f'me_{phase}')
+        if me is None:
+            st.caption("Obligatoire : masse totale d'eau dans les pots.")
+        else:
+            _avertir_hors_plage(me, 0.5, 15.0, 'eau totale (kg)')
+        t0 = st.number_input("T° eau initiale (°C)", value=(float(td['td']) if demo else None),
+                              step=0.5, format='%.1f', key=f'td_{phase}')
+        if t0 is None:
+            st.caption("Obligatoire : température initiale de l'eau.")
+        else:
+            _avertir_hors_plage(t0, 10.0, 45.0, "température initiale de l'eau (°C)")
     with col_final:
         st.markdown('**Pesées et températures finales**')
-        st.number_input('Résidu combustible en fin de phase (kg)', min_value=0.0,
-                         value=float(td['mc'] if demo else 0.0), step=0.001, format='%.3f', key=f'mc_{phase}')
-        k_tf = f'tf_{phase}'
-        if k_tf not in st.session_state:
-            st.session_state[k_tf] = float(td['tf'] if demo else 90.0)
-        st.number_input("T° eau finale (°C)", step=0.5, format='%.1f', key=k_tf)
+        mc = st.number_input('Résidu combustible en fin de phase (kg)', min_value=0.0,
+                              value=(float(td['mc']) if demo else None), step=0.001, format='%.3f', key=f'mc_{phase}')
+        if mc is None:
+            st.caption('Obligatoire : pesée du résidu combustible.')
+        elif mb is not None and mc >= mb:
+            st.markdown(msg_incoherence.format(
+                'Le résidu combustible doit être inférieur au combustible chargé.'),
+                unsafe_allow_html=True)
+        else:
+            _avertir_hors_plage(mc, 0.0, 5.0, 'résidu combustible (kg)')
+        tf = st.number_input("T° eau finale (°C)", value=(float(td['tf']) if demo else None),
+                              step=0.5, format='%.1f', key=f'tf_{phase}')
+        if tf is None:
+            st.caption("Obligatoire : température finale de l'eau.")
+        elif t0 is not None and tf <= t0:
+            st.markdown(msg_incoherence.format(
+                'La température finale doit être supérieure à la température initiale.'),
+                unsafe_allow_html=True)
+        elif tf > 100.0:
+            st.markdown(msg_avertissement.format(
+                "L'eau bout à 100 °C au niveau de la mer : une température finale "
+                "supérieure est très inhabituelle. Vérifiez la saisie — ce n'est pas bloquant."),
+                unsafe_allow_html=True)
+        else:
+            _avertir_hors_plage(tf, 50.0, 100.0, "température finale de l'eau (°C)")
 
-    mb_val = st.session_state.get(f'mb_{phase}', 0.0)
-    mc_val = st.session_state.get(f'mc_{phase}', 0.0)
+    mb_val = mb if mb is not None else 0.0
+    mc_val = mc if mc is not None else 0.0
     st.caption(f'Combustible brûlé estimé : {max(0.0, mb_val - mc_val):.3f} kg '
                f'(chargé en début − résidu en fin)')
 
@@ -591,12 +793,22 @@ def _rendre_onglet_phase(phase, res_csv, nom_fichier, type_comb, hum_comb, T_atm
         f1.number_input('Avant (mg)', min_value=0.0, value=0.0, step=0.001, format='%.3f', key=f'fa_{phase}')
         f2.number_input('Après (mg)', min_value=0.0, value=0.0, step=0.001, format='%.3f', key=f'fp_{phase}')
 
+    champs_manquants = any(v is None for v in (mb, me, t0, mc, tf))
+    incoherent = (mc is not None and mb is not None and mc >= mb) or \
+                 (tf is not None and t0 is not None and tf <= t0)
+    bloque = champs_manquants or incoherent or res_csv is None
+
     st.markdown('')
     if st.button(f'Analyser {phase}', key=f'btn_analyser_{phase}', type='primary',
-                 use_container_width=True, disabled=(res_csv is None)):
+                 use_container_width=True, disabled=bloque):
         _lancer_analyse(phase, res_csv, nom_fichier, type_comb, hum_comb, T_atm, pression,
                          baseline_flow, bg_pm_raw, bg_co_raw, bg_co2_ppm)
         st.rerun()
+    if res_csv is not None:
+        if champs_manquants:
+            st.caption('Renseignez toutes les pesées et températures obligatoires pour analyser cette phase.')
+        elif incoherent:
+            st.caption("Corrigez les valeurs incohérentes signalées ci-dessus avant d'analyser cette phase.")
 
     r = st.session_state.resultats.get(phase)
     if r:
@@ -675,8 +887,17 @@ def etape_4_pesees():
             _rendre_onglet_phase(phase, res_csv, nom_fichier, type_comb, hum_comb, T_atm, pression,
                                   baseline_flow, bg_pm_raw, bg_co_raw, bg_co2_ppm, demo, t_min, df_taux0)
 
+    def _phase_prete(p):
+        vals = (st.session_state.get(f'mb_{p}'), st.session_state.get(f'me_{p}'),
+                st.session_state.get(f'td_{p}'), st.session_state.get(f'mc_{p}'),
+                st.session_state.get(f'tf_{p}'))
+        if any(v is None for v in vals):
+            return False
+        mb, me, t0, mc, tf = vals
+        return mc < mb and tf > t0
+
     st.markdown('')
-    phases_saisies = all(f'mb_{p}' in st.session_state for p in ('HP', 'MP', 'BP'))
+    phases_saisies = all(_phase_prete(p) for p in ('HP', 'MP', 'BP'))
     if st.button('Analyser les 3 phases d\'un coup', type='primary', use_container_width=True,
                  disabled=not phases_saisies, key='btn_analyser_3'):
         with st.spinner('Calculs HP + MP + BP en cours...'):
@@ -685,7 +906,7 @@ def etape_4_pesees():
                                  baseline_flow, bg_pm_raw, bg_co_raw, bg_co2_ppm)
         st.rerun()
     if not phases_saisies:
-        st.caption('Remplissez les pesées des 3 phases pour utiliser ce bouton.')
+        st.caption('Remplissez des pesées cohérentes pour les 3 phases pour utiliser ce bouton.')
 
     col_retour, _, col_suivant = st.columns([1, 3, 1])
     with col_retour:
@@ -766,8 +987,10 @@ def etape_5_rapport():
         ci1, ci2 = st.columns(2)
         st.session_state['date_test'] = ci1.text_input('Date du test (JJ/MM/AAAA)',
             value=st.session_state.get('date_test', ''), placeholder='ex. 01/12/2022', key='r5_date')
-        st.session_state['remarques'] = ci2.text_area('Remarques / observations',
-            value=st.session_state.get('remarques', ''), height=80, key='r5_remarques')
+        st.session_state['observations_operateur'] = ci2.text_area(
+            "Observations de l'opérateur",
+            value=st.session_state.get('observations_operateur', ''), height=80,
+            placeholder='Incidents, rechargements, conditions particulières…', key='r5_observations')
 
     st.markdown(generer_texte(
         analyses, nom_fichier,
@@ -776,7 +999,7 @@ def etape_5_rapport():
         date_test    = st.session_state.get('date_test', ''),
         lieu_test    = st.session_state.get('lieu_test', ''),
         n_replique   = st.session_state.test_n,
-        remarques    = st.session_state.get('remarques', ''),
+        remarques    = st.session_state.get('observations_operateur', ''),
     ))
 
     with st.expander('Recommandations'):
@@ -803,33 +1026,25 @@ def etape_5_rapport():
 
     st.divider()
     st.markdown('**Exports**')
+    ctx_rapport = _construire_contexte_rapport()
     col_pdf, col_xls = st.columns(2)
     with col_pdf:
-        pdf_bytes = generer_pdf(
-            analyses, nom_fichier,
-            nom_testeur  = st.session_state.get('nom_testeur', ''),
-            nom_fourneau = st.session_state.serie.get('foyer', ''),
-            date_test    = st.session_state.get('date_test', ''),
-            lieu_test    = st.session_state.get('lieu_test', ''),
-            n_replique   = st.session_state.test_n,
-            remarques    = st.session_state.get('remarques', ''),
-        )
-        if pdf_bytes:
-            st.download_button('Exporter en PDF', data=pdf_bytes,
-                file_name=f'rapport_LEMS_{nom_fichier.replace(".csv", "")}.pdf',
-                mime='application/pdf', use_container_width=True)
-        else:
-            st.warning('fpdf2 non disponible — installez-le avec `pip install fpdf2`.')
+        pdf_bytes = rapport_pdf.generer_rapport_test(analyses, resultats, ctx_rapport)
+        st.download_button('Exporter en PDF', data=pdf_bytes,
+            file_name=f"{ctx_rapport['numero_rapport']}.pdf",
+            mime='application/pdf', use_container_width=True)
+        st.caption(f"Rapport n° {ctx_rapport['numero_rapport']}")
     with col_xls:
         buffer = io.BytesIO()
         with pd.ExcelWriter(buffer, engine='openpyxl') as writer:
             id_data = {
                 'Champ': ['Fourneau / foyer', 'N° de réplique (test)', 'Testeur(s)', 'Date du test',
-                          'Lieu', 'Remarques', 'Fichier CSV'],
+                          'Lieu', "Observations de l'opérateur", 'Fichier CSV'],
                 'Valeur': [
                     st.session_state.serie.get('foyer', ''), str(st.session_state.test_n),
                     st.session_state.get('nom_testeur', ''), st.session_state.get('date_test', ''),
-                    st.session_state.get('lieu_test', ''), st.session_state.get('remarques', ''),
+                    st.session_state.get('lieu_test', ''),
+                    st.session_state.get('observations_operateur', ''),
                     nom_fichier,
                 ],
             }
@@ -884,8 +1099,25 @@ def etape_5_rapport():
                                'PM2.5 moy. (mg/min)': pm_str, 'N tests': len(vals_eff)})
         if stats_rows:
             st.dataframe(pd.DataFrame(stats_rows).set_index('Phase'), use_container_width=True)
-        st.caption("Les boutons « Exporter » ci-dessus produisent le rapport du dernier test effectué. "
-                   "Un export agrégé multi-tests est une évolution possible (voir limites).")
+        st.caption("Les boutons « Exporter » ci-dessus produisent le rapport du dernier test effectué.")
+
+        if 'rapport_meta_serie' not in st.session_state:
+            st.session_state['rapport_meta_serie'] = {
+                'numero'   : report_counter.numero_rapport_suivant(),
+                'genere_le': datetime.datetime.now(),
+            }
+        meta_serie = st.session_state['rapport_meta_serie']
+        ctx_serie = dict(_construire_contexte_rapport())
+        ctx_serie['numero_rapport'] = meta_serie['numero']
+        ctx_serie['date_emission'] = meta_serie['genere_le'].date()
+        ctx_serie['genere_le'] = meta_serie['genere_le']
+        pdf_serie = rapport_pdf.generer_rapport_serie(
+            ctx_serie, st.session_state.tests_accumules, analyses, resultats)
+        st.download_button('Exporter le rapport de série (PDF)', data=pdf_serie,
+            file_name=f"{meta_serie['numero']}_serie.pdf",
+            mime='application/pdf', use_container_width=True)
+        st.caption(f"Rapport de série n° {meta_serie['numero']}")
+
         if st.button('Retour', use_container_width=True, key='btn_retour_5_fin'):
             st.session_state.etape = 4
             st.rerun()

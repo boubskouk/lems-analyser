@@ -1,0 +1,30 @@
+flowchart TD
+    Start(["Début"])
+    Import["Importer un CSV\nou activer le Mode test"]
+    Decoupe["Découper les phases\nHP / MP / BP"]
+    Saisie["Saisir les données externes\n(combustible, eau, pots)"]
+    Analyse["Analyser la phase"]
+    Decision{"Les 3 phases\nsont-elles faites ?"}
+    Rapport["Générer le rapport global"]
+    Accumuler["Ajouter aux tests accumulés\n(maximum 5)"]
+    Export["Exporter en PDF / Excel"]
+    Fin(["Fin"])
+
+    Start --> Import
+    Import --> Decoupe
+    Decoupe --> Saisie
+    Saisie --> Analyse
+    Analyse --> Decision
+    Decision -- "Non" --> Decoupe
+    Decision -- "Oui" --> Rapport
+    Rapport --> Accumuler
+    Accumuler --> Export
+    Export --> Fin
+
+    classDef etape fill:#edf2f7,color:#1a202c,stroke:#4a5568,stroke-width:1px;
+    classDef decision fill:#ebf8ff,color:#1a202c,stroke:#2b6cb0,stroke-width:1px;
+    classDef terminal fill:#ffffff,color:#1a202c,stroke:#2d3748,stroke-width:1.5px;
+
+    class Import,Decoupe,Saisie,Analyse,Rapport,Accumuler,Export etape;
+    class Decision decision;
+    class Start,Fin terminal;

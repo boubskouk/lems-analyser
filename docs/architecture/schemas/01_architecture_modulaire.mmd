@@ -1,0 +1,28 @@
+flowchart TB
+    Operateur([Opérateur de laboratoire])
+
+    App["app.py\nInterface / Orchestration"]
+
+    Import["import_csv.py\nModule Import"]
+    Calcul["calculs.py\nModule Calcul\n(cœur scientifique)"]
+    Interp["interpretation.py\nModule Interprétation"]
+    Visu["visualisation.py\nModule Visualisation"]
+
+    Operateur --> App
+    App --> Import
+    App --> Calcul
+    App --> Interp
+    App --> Visu
+
+    Import -- "DataFrame calibré" --> Calcul
+    Calcul -- "métriques, Tier" --> Interp
+    Calcul -- "DataFrame calibré" --> Visu
+
+    classDef coeur fill:#2c5282,color:#ffffff,stroke:#1a365d,stroke-width:2px;
+    class Calcul coeur;
+
+    classDef module fill:#edf2f7,color:#1a202c,stroke:#4a5568,stroke-width:1px;
+    class Import,Interp,Visu module;
+
+    classDef orchestration fill:#ffffff,color:#1a202c,stroke:#2d3748,stroke-width:1.5px;
+    class App orchestration;

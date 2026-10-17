@@ -1,0 +1,34 @@
+flowchart TB
+    subgraph L1["Couche présentation"]
+        direction LR
+        P1["app.py"]
+        P2["visualisation.py"]
+    end
+
+    subgraph L2["Couche métier"]
+        direction LR
+        M1["calculs.py"]
+        M2["interpretation.py"]
+    end
+
+    subgraph L3["Couche données"]
+        direction LR
+        D1["import_csv.py"]
+        D2["st.session_state"]
+        D3["Fichiers source\n(CSV LEMS, Excel de référence)"]
+    end
+
+    L1 --> L2
+    L2 --> L3
+
+    classDef presentation fill:#ebf8ff,color:#1a202c,stroke:#2b6cb0,stroke-width:1px;
+    classDef metier fill:#edf2f7,color:#1a202c,stroke:#4a5568,stroke-width:1px;
+    classDef donnees fill:#f7fafc,color:#1a202c,stroke:#718096,stroke-width:1px;
+
+    class P1,P2 presentation;
+    class M1,M2 metier;
+    class D1,D2,D3 donnees;
+
+    style L1 fill:#ffffff,stroke:#2d3748,stroke-width:1px;
+    style L2 fill:#ffffff,stroke:#2d3748,stroke-width:1px;
+    style L3 fill:#ffffff,stroke:#2d3748,stroke-width:1px;

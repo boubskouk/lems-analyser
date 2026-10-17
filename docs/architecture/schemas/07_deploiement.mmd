@@ -1,0 +1,29 @@
+flowchart TB
+    GitHub["Dépôt GitHub\nboubskouk/lems-analyser (branche main)"]
+
+    subgraph Cloud["Streamlit Community Cloud"]
+        SCC["Application LEMS Analyser\n(redéploiement automatique\nà chaque push)"]
+    end
+
+    subgraph VPS["VPS Hostinger"]
+        Docker["Conteneur Docker\nport 8501\n(mise à jour via redeploy.sh)"]
+    end
+
+    Navigateur(["Navigateur de l'utilisateur"])
+
+    GitHub -- "push" --> SCC
+    GitHub -- "git pull" --> Docker
+
+    SCC --> Navigateur
+    Docker --> Navigateur
+
+    classDef source fill:#edf2f7,color:#1a202c,stroke:#4a5568,stroke-width:1px;
+    classDef deploiement fill:#ebf8ff,color:#1a202c,stroke:#2b6cb0,stroke-width:1px;
+    classDef client fill:#ffffff,color:#1a202c,stroke:#2d3748,stroke-width:1.5px;
+
+    class GitHub source;
+    class SCC,Docker deploiement;
+    class Navigateur client;
+
+    style Cloud fill:#ffffff,stroke:#2d3748,stroke-width:1px;
+    style VPS fill:#ffffff,stroke:#2d3748,stroke-width:1px;

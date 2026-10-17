@@ -17,7 +17,8 @@
   --phase-bp: #5E9C98;
 }
 
-html, body, [class^="st-"], [class*=" st-"] {
+body, p, label, input, textarea, button p, h1, h2, h3, h4,
+[data-testid="stMarkdownContainer"] p {
   font-family: 'IBM Plex Sans', sans-serif;
 }
 
@@ -68,16 +69,21 @@ div[data-testid="stButton"] button[kind="secondary"] {
   font-weight: 600;
 }
 
-/* ── En-tête applicative ─────────────────────────────────────────── */
-.lems-header {
+/* ── En-tête applicative : un seul bandeau vert, bouton inclus ──── */
+.st-key-lems_header_row {
+  background: var(--lems-green-dark);
+  color: #FFFFFF;
+  padding: 10px 24px;
+  border-radius: 12px;
+  margin-bottom: 10px;
+}
+.st-key-lems_header_row [data-testid="stHorizontalBlock"] {
+  align-items: center;
+}
+.lems-header__inner {
   display: flex;
   align-items: center;
   gap: 16px;
-  background: var(--lems-green-dark);
-  color: #FFFFFF;
-  padding: 14px 24px;
-  border-radius: 12px;
-  margin-bottom: 10px;
 }
 .lems-header__badge {
   width: 44px; height: 44px; border-radius: 10px;
@@ -87,57 +93,74 @@ div[data-testid="stButton"] button[kind="secondary"] {
   overflow: hidden;
 }
 .lems-header__badge img { max-width: 34px; max-height: 34px; }
-.lems-header__title { font-size: 1.25rem; font-weight: 700; line-height: 1.2; }
+.lems-header__title { font-size: 1.25rem; font-weight: 700; line-height: 1.2; color: #FFFFFF; }
 .lems-header__meta { font-size: 0.78rem; opacity: 0.85; }
 .lems-header__user {
-  margin-left: auto;
   text-align: right;
   font-size: 0.85rem;
+  white-space: nowrap;
 }
 .lems-header__user .name { font-weight: 600; }
 .lems-header__user .role { opacity: 0.8; font-size: 0.75rem; }
+.st-key-lems_header_row div[data-testid="stButton"] button {
+  white-space: nowrap;
+}
 
 /* ── Page de connexion ───────────────────────────────────────────── */
-.lems-login-wrap { margin-bottom: 18px; }
+.st-key-lems_login_row [data-testid="stHorizontalBlock"] {
+  min-height: 80vh;
+}
+.st-key-lems_login_row [data-testid="column"] {
+  display: flex;
+  flex-direction: column;
+}
+.st-key-lems_login_row [data-testid="column"]:nth-of-type(2) {
+  justify-content: center;
+}
 .lems-login-brand {
   background: var(--lems-green-dark);
   color: #FFFFFF;
   border-radius: 12px;
-  padding: 36px 32px;
-  text-align: center;
+  padding: 56px;
+  text-align: left;
+  height: 100%;
+  box-sizing: border-box;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
 }
 .lems-login-badge {
   width: 72px; height: 72px; border-radius: 16px;
   background: #FFFFFF;
   display: flex; align-items: center; justify-content: center;
-  margin: 0 auto 14px auto;
+  margin: 0 0 20px 0;
 }
-.lems-login-logo { max-width: 56px; max-height: 56px; }
-.lems-login-title { font-size: 1.6rem; font-weight: 700; }
+.lems-login-logo { width: 56px; max-width: 56px; max-height: 56px; }
+.lems-login-title { font-size: 28px; font-weight: 700; line-height: 1.3; }
 .lems-login-subtitle { font-size: 0.95rem; opacity: 0.88; margin-bottom: 18px; }
 .lems-login-desc {
-  max-width: 560px; margin: 0 auto 12px auto;
+  max-width: 480px; margin: 0 0 12px 0;
   font-size: 0.92rem; line-height: 1.5; opacity: 0.95;
 }
 .lems-login-norme {
-  max-width: 560px; margin: 0 auto;
+  max-width: 480px; margin: 0;
   font-size: 0.85rem; line-height: 1.5; opacity: 0.8;
 }
-.lems-login-card {
-  background: var(--lems-card);
-  border: 1px solid var(--lems-border);
-  border-radius: 12px;
-  padding: 24px 28px;
-  margin-top: -1px;
+@media (max-width: 640px) {
+  .st-key-lems_login_row [data-testid="stHorizontalBlock"] { min-height: 0; }
+  .lems-login-brand { height: auto; padding: 32px; }
 }
 
 /* ── Couleurs de phase (graphiques, onglets, cartes, tableaux) ──── */
 .phase-chip--HP { border-left: 4px solid var(--phase-hp); }
 .phase-chip--MP { border-left: 4px solid var(--phase-mp); }
 .phase-chip--BP { border-left: 4px solid var(--phase-bp); }
-.lems-phase-label--HP { color: var(--phase-hp); font-weight: 700; }
-.lems-phase-label--MP { color: var(--phase-mp); font-weight: 700; }
-.lems-phase-label--BP { color: var(--phase-bp); font-weight: 700; }
+/* Couleurs de TEXTE des titres de phase : plus sombres que les couleurs de
+   bordure/zone/courbe (--phase-mp, --phase-bp) pour un contraste suffisant
+   sur fond blanc. */
+.lems-phase-label--HP { color: #1D4E89; font-weight: 700; }
+.lems-phase-label--MP { color: #9A5512; font-weight: 700; }
+.lems-phase-label--BP { color: #2F6662; font-weight: 700; }
 
 /* ── Barre d'étapes (stepper) ────────────────────────────────────── */
 .lems-stepper { display: flex; gap: 6px; flex-wrap: wrap; justify-content: flex-end; }
@@ -181,4 +204,35 @@ div[data-testid="stDataFrame"] {
   border-radius: 8px;
   overflow: hidden;
   border: 1px solid var(--lems-border);
+}
+
+/* ── Traduction du composant d'upload de fichier (st.file_uploader) ─
+   Streamlit ne permet pas de changer ces textes autrement qu'en CSS.
+   Structure réelle (vérifiée dans le navigateur) : la zone ne contient
+   PAS de texte "Drag and drop file here" séparé — seulement le bouton
+   ("Upload") et la ligne de limite ("200MB per file • CSV"). ── */
+[data-testid="stFileUploaderDropzoneInstructions"] span {
+  font-size: 0;
+}
+[data-testid="stFileUploaderDropzoneInstructions"] span::before {
+  content: "Fichier CSV du LEMS · 200 Mo maximum";
+  font-size: 0.8rem;
+}
+[data-testid="stFileUploaderDropzone"] button [data-testid="stMarkdownContainer"] p {
+  font-size: 0;
+}
+[data-testid="stFileUploaderDropzone"] button [data-testid="stMarkdownContainer"] p::before {
+  content: "Choisir un fichier";
+  font-size: 0.875rem;
+}
+
+/* ── Icônes Material Symbols : ne jamais laisser IBM Plex Sans les
+   écraser (sinon le nom de l'icône s'affiche en texte, ex. "arrow_right"
+   dans les expanders, "upload" sur le bouton d'import). ───────────── */
+[data-testid="stIconMaterial"],
+.material-symbols-rounded,
+[class*="material-symbols"],
+[data-testid="stExpanderToggleIcon"] {
+  font-family: "Material Symbols Rounded" !important;
+  font-feature-settings: "liga" !important;
 }

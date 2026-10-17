@@ -1,0 +1,41 @@
+flowchart TB
+    subgraph CImport["import_csv.py"]
+        FImport["lire_csv()"]
+    end
+
+    subgraph CCalcul["calculs.py"]
+        FCalcul["appliquer_calibration()\ncalculer_taux_emission()\nanalyser()"]
+    end
+
+    subgraph CInterp["interpretation.py"]
+        FInterp["analyser_phase()\ngenerer_texte()\ngenerer_pdf()"]
+    end
+
+    subgraph CVisu["visualisation.py"]
+        FVisu["graphique_comparaison_calibration()\ntableau_calibration_df()"]
+    end
+
+    Streamlit["Streamlit\n(dépendance externe)"]
+    Plotly["Plotly\n(dépendance externe)"]
+    Pandas["pandas / NumPy\n(dépendance externe)"]
+
+    CImport --> CCalcul
+    CCalcul --> CInterp
+    CCalcul --> CVisu
+
+    CImport -. utilise .-> Pandas
+    CCalcul -. utilise .-> Pandas
+    CInterp -. utilise .-> Plotly
+    CVisu -. utilise .-> Plotly
+    CImport -. s'exécute dans .-> Streamlit
+
+    classDef module fill:#edf2f7,color:#1a202c,stroke:#4a5568,stroke-width:1px;
+    classDef ext fill:#ffffff,color:#4a5568,stroke:#a0aec0,stroke-width:1px,stroke-dasharray: 3 3;
+
+    class CImport,CCalcul,CInterp,CVisu module;
+    class Streamlit,Plotly,Pandas ext;
+
+    style CImport fill:#edf2f7,stroke:#4a5568,stroke-width:1px;
+    style CCalcul fill:#edf2f7,stroke:#4a5568,stroke-width:1px;
+    style CInterp fill:#edf2f7,stroke:#4a5568,stroke-width:1px;
+    style CVisu fill:#edf2f7,stroke:#4a5568,stroke-width:1px;

@@ -44,7 +44,7 @@ MCE_SEUILS = [
     (98.0, 'Très bonne combustion — CO maîtrisé'),
     (95.0, 'Bonne combustion'),
     (90.0, 'Combustion incomplète — CO significatif'),
-    (0,    'Combustion très incomplète — risque sanitaire élevé'),
+    (0,    'Combustion très incomplète'),
 ]
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -471,10 +471,10 @@ def generer_texte(analyses, nom_fichier='', nom_testeur='', nom_fourneau='',
             f"- Durée : {a['duree_min']:.1f} min  \n"
             f"- Efficacité thermique ({eff_lbl}) : **{a['eff']:.1f}%** "
             f"→ Tier {a['t_eff']} ({TIER_LABEL[a['t_eff']]}){ref_txt}  \n"
-            f"- CO : **{a['co_g_min']:.4f} g/min** → Tier {a['t_co_rate']} "
-            f"| CO normalisé : {a['co_mjd']:.2f} g/MJd → Tier {a['t_co_mjd']} (ISO)  \n"
-            f"- PM₂.₅ : **{a['pm_mg_min']:.4f} mg/min** → Tier {a['t_pm_rate']} "
-            f"| PM normalisé : {a['pm_mjd']:.1f} mg/MJd → Tier {a['t_pm_mjd']} (ISO)  \n"
+            f"- CO : **{a['co_mjd']:.2f} g/MJd** → Tier {a['t_co_mjd']} (ISO) "
+            f"| taux instantané : {a['co_g_min']:.4f} g/min  \n"
+            f"- PM₂.₅ : **{a['pm_mjd']:.1f} mg/MJd** → Tier {a['t_pm_mjd']} (ISO) "
+            f"| taux instantané : {a['pm_mg_min']:.4f} mg/min  \n"
             f"- MCE : **{a['mce']:.2f}%** — {a['mce_label']}  \n"
             f"- ⚠️ Facteur limitant : {a['limitant']}"
         )
@@ -558,195 +558,3 @@ def generer_recommandations(analyses):
         )))
 
     return recs
-
-
-# ─────────────────────────────────────────────────────────────────────────────
-# Génération PDF professionnel
-# ─────────────────────────────────────────────────────────────────────────────
-
-def generer_pdf(analyses, nom_fichier, nom_testeur='', nom_fourneau='',
-                date_test='', lieu_test='', n_replique=None, remarques=''):
-    try:
-        from fpdf import FPDF
-    except ImportError:
-        return None
-
-    import os
-    ARIAL_R     = os.path.join('C:' + chr(92), 'Windows', 'Fonts', 'arial.ttf')
-    ARIAL_B_PATH = os.path.join('C:' + chr(92), 'Windows', 'Fonts', 'arialbd.ttf')
-    ARIAL_I_PATH = os.path.join('C:' + chr(92), 'Windows', 'Fonts', 'ariali.ttf')
-    USE_UNICODE = os.path.exists(ARIAL_R) and os.path.exists(ARIAL_B_PATH)
-
-    def _s(txt):
-        if USE_UNICODE:
-            return str(txt)
-        t = str(txt)
-        for src, dst in [('\u2014','-'),('\u2013','-'),('\u2082','2'),
-                         ('\u2085','5'),('\u2081','1'),('\u2265','>='),
-                         ('\u2264','<='),('\u00b1','+/-'),('\u00d7','x'),
-                         ('\n',' ')]:
-            t = t.replace(src, dst)
-        return t.encode('latin-1', errors='replace').decode('latin-1')
-
-    tier_global = min(a['t_iwa11'] for a in analyses.values())
-
-    pdf = FPDF()
-    if USE_UNICODE:
-        pdf.add_font('Arial', '',  ARIAL_R,      uni=True)
-        pdf.add_font('Arial', 'B', ARIAL_B_PATH, uni=True)
-        if os.path.exists(ARIAL_I_PATH):
-            pdf.add_font('Arial', 'I', ARIAL_I_PATH, uni=True)
-        FONT = 'Arial'
-    else:
-        FONT = 'Helvetica'
-    pdf.set_auto_page_break(auto=True, margin=15)
-    pdf.add_page()
-
-    # ── En-tête ──────────────────────────────────────────────────────────────
-    pdf.set_fill_color(21, 101, 192)
-    pdf.set_text_color(255, 255, 255)
-    pdf.set_font(FONT, 'B', 16)
-    pdf.cell(0, 12, "RAPPORT D'ANALYSE LEMS - WBT", fill=True, ln=True, align='C')
-    pdf.set_font(FONT, '', 10)
-    pdf.cell(0, 6, _s(f'Fichier : {nom_fichier}'), ln=True, align='C')
-    pdf.cell(0, 6, 'Conforme ISO 19867-1 / IWA-11  |  CERER / ESP-UCAD', ln=True, align='C')
-    pdf.ln(3)
-
-    # ── Informations d'identification ────────────────────────────────────────
-    meta_items = [
-        ('Testeur(s)',  nom_testeur),
-        ('Fourneau',    nom_fourneau),
-        ('Date',        date_test),
-        ('Lieu',        lieu_test),
-        ('N replique',  str(n_replique) if n_replique else ''),
-        ('Remarques',   remarques),
-    ]
-    meta_items = [(l, v) for l, v in meta_items if v]
-    if meta_items:
-        pdf.set_font(FONT, 'B', 9)
-        pdf.set_fill_color(21, 101, 192)
-        pdf.set_text_color(255, 255, 255)
-        pdf.cell(0, 6, 'Informations du test', fill=True, ln=True)
-        pdf.set_font(FONT, '', 9)
-        pdf.set_text_color(0, 0, 0)
-        for label, val in meta_items:
-            pdf.set_fill_color(232, 240, 254)
-            pdf.cell(45, 5, _s(label + ' :'), fill=True,  border=1)
-            pdf.cell(0,  5, _s(val),          fill=False, border=1, ln=True)
-        pdf.ln(3)
-    pdf.set_text_color(0, 0, 0)
-
-    # ── Classement global ────────────────────────────────────────────────────
-    pdf.set_text_color(0, 0, 0)
-    pdf.set_font(FONT, 'B', 13)
-    r, g, b = (46, 125, 50) if tier_global >= 3 else (230, 81, 0) if tier_global == 2 else (183, 28, 28)
-    pdf.set_text_color(r, g, b)
-    pdf.cell(0, 9, _s(f'Classement global : Tier {tier_global} — {TIER_LABEL[tier_global]}'), ln=True)
-    pdf.set_text_color(0, 0, 0)
-    pdf.ln(2)
-
-    # ── Tableau de synthèse IWA-11 ───────────────────────────────────────────
-    pdf.set_font(FONT, 'B', 12)
-    pdf.cell(0, 7, 'Synthese des resultats IWA-11 par phase', ln=True)
-
-    col_w = [44, 28, 28, 28, 28, 20, 24]
-    headers = ['Phase', 'CO g/min', 'T.CO', 'PM mg/min', 'T.PM', 'Eff.%', 'MCE%']
-    pdf.set_font(FONT, 'B', 9)
-    pdf.set_fill_color(21, 101, 192)
-    pdf.set_text_color(255, 255, 255)
-    for w, h in zip(col_w, headers):
-        pdf.cell(w, 7, h, fill=True, border=1, align='C')
-    pdf.ln()
-
-    pdf.set_font(FONT, '', 9)
-    for a in analyses.values():
-        bg = (232, 245, 233) if a['t_iwa11'] >= 3 else (255, 243, 224) if a['t_iwa11'] == 2 else (255, 235, 238)
-        pdf.set_fill_color(*bg)
-        pdf.set_text_color(0, 0, 0)
-        vals = [
-            _s(a['label']),
-            f"{a['co_g_min']:.4f}", f"T{a['t_co_rate']}",
-            f"{a['pm_mg_min']:.4f}", f"T{a['t_pm_rate']}",
-            f"{a['eff']:.1f}", f"{a['mce']:.1f}",
-        ]
-        for w, v in zip(col_w, vals):
-            pdf.cell(w, 7, v, fill=True, border=1, align='C')
-        pdf.ln()
-    pdf.ln(4)
-
-    # ── Seuils IWA-11 de référence ───────────────────────────────────────────
-    pdf.set_font(FONT, 'B', 11)
-    pdf.cell(0, 7, 'Seuils IWA-11 de reference', ln=True)
-    col_w2 = [28, 40, 48, 44, 40]
-    hdrs2 = ['Tier', 'Classement', 'CO max (g/min)', 'PM2.5 max (mg/min)', 'Eff. min (%)']
-    pdf.set_font(FONT, 'B', 9)
-    pdf.set_fill_color(21, 101, 192)
-    pdf.set_text_color(255, 255, 255)
-    for w, h in zip(col_w2, hdrs2):
-        pdf.cell(w, 6, h, fill=True, border=1, align='C')
-    pdf.ln()
-
-    tier_rows = [
-        ('Tier 4', 'Excellent',       '< 0.50',  '< 0.50',  '>= 40%'),
-        ('Tier 3', 'Bon',             '< 2.00',  '< 2.50',  '>= 30%'),
-        ('Tier 2', 'Intermediaire',   '< 4.00',  '< 5.00',  '>= 20%'),
-        ('Tier 1', 'Basique',         '< 8.00',  '< 10.00', '>= 10%'),
-        ('Tier 0', 'Hors normes',     '>= 8.00', '>= 10.00','< 10%'),
-    ]
-    pdf.set_font(FONT, '', 9)
-    pdf.set_text_color(0, 0, 0)
-    for row in tier_rows:
-        pdf.set_fill_color(245, 245, 245)
-        for w, v in zip(col_w2, row):
-            pdf.cell(w, 6, v, fill=True, border=1, align='C')
-        pdf.ln()
-    pdf.ln(5)
-
-    # ── Interprétation par phase ─────────────────────────────────────────────
-    pdf.set_font(FONT, 'B', 11)
-    pdf.cell(0, 7, 'Interpretation detaillee par phase', ln=True)
-    pdf.set_font(FONT, '', 10)
-    for a in analyses.values():
-        ref = a['ref']
-        signe = '+' if a['vs_ref_eff'] >= 0 else ''
-        pdf.set_font(FONT, 'B', 10)
-        pdf.cell(0, 6, _s(f"Phase {a['code']} — {a['label']}"), ln=True)
-        pdf.set_font(FONT, '', 9)
-        eff_lbl_pdf = 'avec residu charbonneux' if a['a_residu_charbonneux'] else 'residu non applicable'
-        lines = [
-            _s(f"  Duree : {a['duree_min']:.1f} min"),
-            _s(f"  Efficacite thermique ({eff_lbl_pdf}) : {a['eff']:.1f}% "
-               f"(Tier {a['t_eff']}) | ref. 5 tests : "
-               f"{ref.get('eff_avec_char', '—')} +/- {ref.get('eff_sd', 0):.1f}%, "
-               f"ecart : {signe}{a['vs_ref_eff']:.1f}%"),
-            _s(f"  CO : {a['co_g_min']:.4f} g/min (Tier {a['t_co_rate']}) "
-               f"| {a['co_mjd']:.2f} g/MJd (ISO Tier {a['t_co_mjd']})"),
-            _s(f"  PM2.5 : {a['pm_mg_min']:.4f} mg/min (Tier {a['t_pm_rate']}) "
-               f"| {a['pm_mjd']:.1f} mg/MJd (ISO Tier {a['t_pm_mjd']})"),
-            _s(f"  MCE : {a['mce']:.2f}% — {a['mce_label']}"),
-            _s(f"  Facteur limitant : {a['limitant']}"),
-        ]
-        for line in lines:
-            pdf.cell(0, 5, line, ln=True)
-        pdf.ln(2)
-
-    # ── Recommandations ──────────────────────────────────────────────────────
-    pdf.add_page()
-    pdf.set_font(FONT, 'B', 11)
-    pdf.cell(0, 7, 'Recommandations', ln=True)
-    pdf.set_font(FONT, '', 9)
-    for cat, rec in generer_recommandations(analyses):
-        pdf.set_font(FONT, 'B', 10)
-        pdf.cell(0, 6, _s(cat), ln=True)
-        pdf.set_font(FONT, '', 9)
-        pdf.multi_cell(0, 5, _s(rec))
-        pdf.ln(2)
-
-    pdf.ln(5)
-    pdf.set_font(FONT, 'I', 8)
-    pdf.set_text_color(120, 120, 120)
-    pdf.cell(0, 5,
-             'Rapport genere par LEMS Analyser - CERER/ESP-UCAD - ISO 19867-1 / IWA-11',
-             align='C', ln=True)
-
-    return bytes(pdf.output())
