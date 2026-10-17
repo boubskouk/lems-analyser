@@ -13,6 +13,7 @@ __pycache__/
 *.zip
 *.lnk
 *.PNG
+!assets/logo-cerer.png
 *.jpeg
 *.jpg
 *.avif
@@ -33,3 +34,7 @@ desktop.ini
 # Fichiers temporaires
 *.tmp
 *.bak
+
+# Secrets (comptes + mots de passe hachés)
+secrets.toml
+.streamlit/secrets.toml

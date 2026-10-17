@@ -1,0 +1,184 @@
+/* LEMS Analyser — identité visuelle (refonte UI, 2026-10-17) */
+
+@import url('https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap');
+
+:root {
+  --lems-green: #1F5C45;
+  --lems-green-dark: #163F31;
+  --lems-bg: #F5F6F3;
+  --lems-card: #FFFFFF;
+  --lems-text: #18211D;
+  --lems-border: #DDE2DC;
+  --lems-border-strong: #C7CFC8;
+  --lems-warn-bg: #FFF6E5;
+  --lems-warn-border: #F0C98A;
+  --phase-hp: #1D4E89;
+  --phase-mp: #D08A2E;
+  --phase-bp: #5E9C98;
+}
+
+html, body, [class^="st-"], [class*=" st-"] {
+  font-family: 'IBM Plex Sans', sans-serif;
+}
+
+.stApp { background-color: var(--lems-bg); color: var(--lems-text); }
+
+/* Chiffres, indicateurs, noms de fichiers en police mono */
+div[data-testid="stMetricValue"],
+div[data-testid="stDataFrame"],
+code, .lems-mono {
+  font-family: 'IBM Plex Mono', monospace;
+}
+
+/* ── Masquer le chrome Streamlit par défaut ─────────────────────── */
+#MainMenu { visibility: hidden; }
+footer { visibility: hidden; }
+header [data-testid="stToolbar"] { visibility: hidden; }
+div[data-testid="stDecoration"] { display: none; }
+.stDeployButton { display: none !important; }
+
+/* ── Cartes ──────────────────────────────────────────────────────── */
+div[data-testid="stVerticalBlockBorderWrapper"],
+.lems-card {
+  background: var(--lems-card);
+  border: 1px solid var(--lems-border);
+  border-radius: 12px !important;
+}
+.lems-card { padding: 20px 24px; }
+
+/* ── Boutons ─────────────────────────────────────────────────────── */
+div[data-testid="stButton"] button[kind="primary"],
+div[data-testid="stFormSubmitButton"] button[kind="primary"] {
+  background-color: var(--lems-green);
+  border-color: var(--lems-green);
+  color: #FFFFFF;
+  border-radius: 8px;
+  font-weight: 600;
+}
+div[data-testid="stButton"] button[kind="primary"]:hover,
+div[data-testid="stFormSubmitButton"] button[kind="primary"]:hover {
+  background-color: var(--lems-green-dark);
+  border-color: var(--lems-green-dark);
+}
+div[data-testid="stButton"] button[kind="secondary"] {
+  background-color: #FFFFFF;
+  border: 1px solid var(--lems-border-strong);
+  border-radius: 8px;
+  color: var(--lems-text);
+  font-weight: 600;
+}
+
+/* ── En-tête applicative ─────────────────────────────────────────── */
+.lems-header {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  background: var(--lems-green-dark);
+  color: #FFFFFF;
+  padding: 14px 24px;
+  border-radius: 12px;
+  margin-bottom: 10px;
+}
+.lems-header__badge {
+  width: 44px; height: 44px; border-radius: 10px;
+  background: #FFFFFF;
+  display: flex; align-items: center; justify-content: center;
+  flex: 0 0 auto;
+  overflow: hidden;
+}
+.lems-header__badge img { max-width: 34px; max-height: 34px; }
+.lems-header__title { font-size: 1.25rem; font-weight: 700; line-height: 1.2; }
+.lems-header__meta { font-size: 0.78rem; opacity: 0.85; }
+.lems-header__user {
+  margin-left: auto;
+  text-align: right;
+  font-size: 0.85rem;
+}
+.lems-header__user .name { font-weight: 600; }
+.lems-header__user .role { opacity: 0.8; font-size: 0.75rem; }
+
+/* ── Page de connexion ───────────────────────────────────────────── */
+.lems-login-wrap { margin-bottom: 18px; }
+.lems-login-brand {
+  background: var(--lems-green-dark);
+  color: #FFFFFF;
+  border-radius: 12px;
+  padding: 36px 32px;
+  text-align: center;
+}
+.lems-login-badge {
+  width: 72px; height: 72px; border-radius: 16px;
+  background: #FFFFFF;
+  display: flex; align-items: center; justify-content: center;
+  margin: 0 auto 14px auto;
+}
+.lems-login-logo { max-width: 56px; max-height: 56px; }
+.lems-login-title { font-size: 1.6rem; font-weight: 700; }
+.lems-login-subtitle { font-size: 0.95rem; opacity: 0.88; margin-bottom: 18px; }
+.lems-login-desc {
+  max-width: 560px; margin: 0 auto 12px auto;
+  font-size: 0.92rem; line-height: 1.5; opacity: 0.95;
+}
+.lems-login-norme {
+  max-width: 560px; margin: 0 auto;
+  font-size: 0.85rem; line-height: 1.5; opacity: 0.8;
+}
+.lems-login-card {
+  background: var(--lems-card);
+  border: 1px solid var(--lems-border);
+  border-radius: 12px;
+  padding: 24px 28px;
+  margin-top: -1px;
+}
+
+/* ── Couleurs de phase (graphiques, onglets, cartes, tableaux) ──── */
+.phase-chip--HP { border-left: 4px solid var(--phase-hp); }
+.phase-chip--MP { border-left: 4px solid var(--phase-mp); }
+.phase-chip--BP { border-left: 4px solid var(--phase-bp); }
+.lems-phase-label--HP { color: var(--phase-hp); font-weight: 700; }
+.lems-phase-label--MP { color: var(--phase-mp); font-weight: 700; }
+.lems-phase-label--BP { color: var(--phase-bp); font-weight: 700; }
+
+/* ── Barre d'étapes (stepper) ────────────────────────────────────── */
+.lems-stepper { display: flex; gap: 6px; flex-wrap: wrap; justify-content: flex-end; }
+.lems-step {
+  font-size: 0.74rem;
+  font-weight: 600;
+  padding: 4px 10px;
+  border-radius: 999px;
+  white-space: nowrap;
+}
+.lems-step--done { background: #E6F0EB; color: var(--lems-green); }
+.lems-step--current { background: var(--lems-green); color: #FFFFFF; }
+.lems-step--todo { background: #ECECE9; color: #8A8F89; }
+.lems-series-label { font-size: 0.85rem; color: #4B534C; font-weight: 600; }
+
+/* ── Encadré "à faire maintenant" ─────────────────────────────────── */
+.lems-todo-box {
+  background: var(--lems-warn-bg);
+  border: 1px solid var(--lems-warn-border);
+  border-radius: 10px;
+  padding: 12px 16px;
+  margin: 10px 0 16px 0;
+  font-size: 0.92rem;
+}
+.lems-todo-box strong { color: #7A5A12; }
+
+/* ── Badges d'état des phases (étape 4) ──────────────────────────── */
+.lems-badge-ok {
+  background: #E6F0EB; color: var(--lems-green);
+  border-radius: 999px; padding: 3px 10px;
+  font-size: 0.78rem; font-weight: 600;
+}
+.lems-badge-todo {
+  background: #ECECE9; color: #6B716A;
+  border-radius: 999px; padding: 3px 10px;
+  font-size: 0.78rem; font-weight: 600;
+}
+
+/* ── Tableaux ────────────────────────────────────────────────────── */
+div[data-testid="stDataFrame"] {
+  border-radius: 8px;
+  overflow: hidden;
+  border: 1px solid var(--lems-border);
+}
