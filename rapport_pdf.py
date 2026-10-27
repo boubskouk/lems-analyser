@@ -884,16 +884,18 @@ def generer_rapport_serie(ctx, tests_accumules, dernier_analyses, dernier_result
                 # Métrique non calculée par l'app (productivité charbon) :
                 # affichée "n.d." plutôt qu'une valeur inventée. 2 lignes
                 # (Moy./ET) seulement, comme dans le tableau-type du labo.
+                # "Métrique" et "Performance" fusionnées verticalement
+                # (rowspan=2) sur les 2 lignes, comme dans Capt.PNG — pas
+                # des cellules vides répétées.
                 row = table.row()
-                row.cell(libelle, style=gras)
+                row.cell(libelle, style=gras, rowspan=2)
                 row.cell('Moy.', style=normal)
                 for _ in range(4):
                     row.cell('n.d.', style=normal)
-                row.cell('n.d.', style=normal)
+                row.cell('n.d.', style=normal, rowspan=2)
                 row = table.row()
-                row.cell('', style=normal)
                 row.cell('ET', style=normal)
-                for _ in range(5):
+                for _ in range(4):
                     row.cell('n.d.', style=normal)
                 continue
 
@@ -909,28 +911,27 @@ def generer_rapport_serie(ctx, tests_accumules, dernier_analyses, dernier_result
 
             moy = {c: _fmt_cell(donnees[c], dec) for c in ('HP', 'MP', 'BP', 'Combine')}
             n_eff = len(donnees['Combine'])
+            n_lignes = 3 if (avec_ci and n_eff > 1) else 2
 
+            # "Métrique" et "Performance" fusionnées verticalement (rowspan)
+            # sur les n_lignes (2 ou 3) de ce bloc, comme dans Capt.PNG.
             row = table.row()
-            row.cell(libelle, style=gras)
+            row.cell(libelle, style=gras, rowspan=n_lignes)
             row.cell('Moy.', style=normal)
             for c in ('HP', 'MP', 'BP', 'Combine'):
                 row.cell(moy[c][0], style=(gras if c == 'Combine' else normal))
-            row.cell(perf_txt, style=gras)
+            row.cell(perf_txt, style=gras, rowspan=n_lignes)
 
             row = table.row()
-            row.cell('', style=normal)
             row.cell('ET', style=normal)
             for c in ('HP', 'MP', 'BP', 'Combine'):
                 row.cell(moy[c][1], style=normal)
-            row.cell('', style=normal)
 
-            if avec_ci and n_eff > 1:
+            if n_lignes == 3:
                 row = table.row()
-                row.cell('', style=normal)
                 row.cell('IC 90%', style=normal)
                 for c in ('HP', 'MP', 'BP', 'Combine'):
                     row.cell(moy[c][2], style=normal)
-                row.cell('', style=normal)
 
         # Sécurité : une seule ligne "Score", valeur unique (pas de ventilation
         # par phase), exactement comme dans le tableau-type du labo.
