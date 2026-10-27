@@ -32,6 +32,7 @@ APP_VERSION = '1.0'
 _DIR = os.path.dirname(os.path.abspath(__file__))
 _FONTS_DIR = os.path.join(_DIR, 'assets', 'fonts')
 _LOGO_PATH = os.path.join(_DIR, 'assets', 'logo-cerer.png')
+_LOGO_UCAD_PATH = os.path.join(_DIR, 'assets', 'logo-ucad.png')
 
 # ─────────────────────────────────────────────────────────────────────────
 # Palette
@@ -378,15 +379,20 @@ def _page_identification_et_resultat(pdf, ctx, analyses, tier_global, test_label
         pdf.genere_footer = (f"Généré le {genere_le.strftime('%d/%m/%Y à %H:%M')} · "
                               f"LEMS Analyser v{APP_VERSION}")
 
-    # ── Entête CERER ────────────────────────────────────────────────
+    # ── Entête UCAD + CERER ──────────────────────────────────────────
     y0 = pdf.get_y()
-    if os.path.exists(_LOGO_PATH):
+    if os.path.exists(_LOGO_UCAD_PATH):
         try:
-            pdf.image(_LOGO_PATH, x=MARGE, y=y0, w=16)
+            pdf.image(_LOGO_UCAD_PATH, x=MARGE, y=y0, w=12)
         except Exception:
             pass
-    x_gauche = MARGE + 20
-    larg_gauche = 83
+    if os.path.exists(_LOGO_PATH):
+        try:
+            pdf.image(_LOGO_PATH, x=MARGE + 13, y=y0, w=14)
+        except Exception:
+            pass
+    x_gauche = MARGE + 29
+    larg_gauche = 74
     larg_droite = 62
     x_droite = PAGE_W - MARGE - larg_droite
     pdf.set_xy(x_gauche, y0)
