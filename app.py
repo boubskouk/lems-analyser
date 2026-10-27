@@ -103,8 +103,10 @@ def _reset_test_data():
     for p in ('HP', 'MP', 'BP'):
         st.session_state.pop(f'intervalle_{p}', None)
         for kk in (f'mb_{p}', f'mc_{p}', f'cp_{p}', f'me_{p}', f'td_{p}', f'tf_{p}',
-                   f'fa_{p}', f'fp_{p}'):
+                   f'fa_{p}', f'fp_{p}', f'deb_{p}', f'fin_{p}'):
             st.session_state.pop(kk, None)
+    for kk in ('horloge_debut_hp', 'horloge_fin_hp', 'horloge_fin_mp', 'horloge_fin_bp'):
+        st.session_state.pop(kk, None)
     st.session_state.resultats = {}
 
 
@@ -609,6 +611,9 @@ def etape_3_phases():
     st.session_state['zero_bg_co2_ppm']    = bg_co2_ppm
     st.session_state['zero_baseline_flow'] = baseline_flow
 
+    st.info(f"⏱ Heure de démarrage de l'enregistrement LEMS : **{res_csv.get('date', '—')} à "
+            f"{res_csv.get('heure', '—')}**")
+
     df0, df_cal0, df_taux0, _ = _calculer_df_taux(res_csv, s, bg_pm_raw, bg_co_raw, bg_co2_ppm, baseline_flow)
     t_min = df0['seconds'] / 60.0
     t_min_val, t_max_val = float(t_min.min()), float(t_min.max())
@@ -618,6 +623,66 @@ def etape_3_phases():
     # quand l'arrondi flottant de t_max_val ne tombait pas du même côté.
     t_min_r, t_max_r = round(t_min_val, 1), round(t_max_val, 1)
     duree_tot_min = t_max_r - t_min_r
+
+    with st.expander("Saisir les heures de phase à l'horloge (optionnel, plus fiable qu'un "
+                      "calcul manuel de minutes écoulées)"):
+        st.caption(
+            "Indiquez l'heure d'horloge à laquelle chaque phase a réellement commencé "
+            "(ex. heure d'allumage pour HP, heure de rechargement pour MP, etc.). L'app "
+            "calcule elle-même le nombre de minutes écoulées depuis le début de "
+            "l'enregistrement — vous n'avez rien à soustraire à la main."
+        )
+        heure_ref = None
+        try:
+            heure_ref = datetime.datetime.strptime(res_csv.get('heure', ''), '%H:%M:%S').time()
+        except ValueError:
+            st.warning("Heure de démarrage du fichier illisible — saisie à l'horloge indisponible "
+                       "pour ce fichier, utilisez les champs en minutes ci-dessous.")
+
+        if heure_ref is not None:
+            col_h1, col_h2, col_h3, col_h4 = st.columns(4)
+            t_debut_hp = col_h1.time_input('Début HP (allumage)', value=None, step=60, key='horloge_debut_hp')
+            t_fin_hp   = col_h2.time_input('Fin HP = début MP', value=None, step=60, key='horloge_fin_hp')
+            t_fin_mp   = col_h3.time_input('Fin MP = début BP', value=None, step=60, key='horloge_fin_mp')
+            t_fin_bp   = col_h4.time_input('Fin BP', value=None, step=60, key='horloge_fin_bp')
+
+            def _ecart_min(t_cible):
+                if t_cible is None:
+                    return None
+                ref_s = heure_ref.hour * 3600 + heure_ref.minute * 60 + heure_ref.second
+                cible_s = t_cible.hour * 3600 + t_cible.minute * 60 + t_cible.second
+                ecart_s = cible_s - ref_s
+                if ecart_s < 0:
+                    ecart_s += 24 * 3600  # passage de minuit
+                return ecart_s / 60.0
+
+            points = [_ecart_min(t_debut_hp), _ecart_min(t_fin_hp),
+                      _ecart_min(t_fin_mp), _ecart_min(t_fin_bp)]
+
+            if st.button('Appliquer ces heures aux 3 phases', key='btn_appliquer_horloge',
+                         disabled=any(p is None for p in points)):
+                croissant = all(points[i] < points[i + 1] for i in range(3))
+                dans_bornes = all(t_min_r - 1e-6 <= p <= t_max_r + 1e-6 for p in points)
+                if not croissant:
+                    st.error("Les heures doivent être dans l'ordre chronologique "
+                             "(Début HP < Fin HP < Fin MP < Fin BP).")
+                elif not dans_bornes:
+                    st.error(f"Ces heures tombent en dehors de la durée du fichier "
+                             f"({t_min_r:.1f} à {t_max_r:.1f} min après le démarrage de "
+                             f"l'enregistrement). Vérifiez l'heure saisie.")
+                else:
+                    p0, p1, p2, p3 = (round(p, 1) for p in points)
+                    st.session_state['deb_HP'] = p0
+                    st.session_state['fin_HP'] = p1
+                    st.session_state['deb_MP'] = p1
+                    st.session_state['fin_MP'] = p2
+                    st.session_state['deb_BP'] = p2
+                    st.session_state['fin_BP'] = p3
+                    st.session_state['intervalle_HP'] = (p0, p1)
+                    st.session_state['intervalle_MP'] = (p1, p2)
+                    st.session_state['intervalle_BP'] = (p2, p3)
+                    st.success('Intervalles mis à jour à partir des heures saisies.')
+                    st.rerun()
 
     tiers = [
         (t_min_r, round(t_min_r + duree_tot_min * 0.37, 1)),
