@@ -600,6 +600,8 @@ def _page_resultats_phases(pdf, ctx, analyses, resultats, tier_global):
                [fr(analyses[c]['eff_sc'], 1) for c in phases_ordre])
         _ligne(table, 'Efficacité thermique, avec charbon résiduel', '%',
                [fr(analyses[c]['eff'], 1) for c in phases_ordre])
+        _ligne(table, 'Tier Efficacité thermique', '0 à 5',
+               [str(analyses[c]['t_eff']) for c in phases_ordre])
         _ligne(table, 'Puissance de cuisson', 'W',
                [fr(analyses[c]['puissance_cuis_W'], 0) for c in phases_ordre])
         _ligne(table, 'Taux de combustion', 'g/min',
