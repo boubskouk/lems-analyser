@@ -235,17 +235,22 @@ def _lancer_analyse(phase, res_csv, nom_fichier, type_comb, hum_comb, T_atm, pre
     st.session_state.resultats[phase] = result
 
 
-def _enregistrer_test_courant(tier_global, analyses):
+def _enregistrer_test_courant(tier_global, analyses, resultats):
     entree = {
         'fichier': st.session_state.get('current_csv_name', ''),
         'tier'   : tier_global,
         'phases' : {c: {
-            'eff'      : a['eff'],
-            'co_g_min' : a['co_g_min'],
-            'pm_mg_min': a['pm_mg_min'],
-            'co_mjd'   : a['co_mjd'],
-            'pm_mjd'   : a['pm_mjd'],
-            'mce'      : a['mce'],
+            'eff'          : a['eff'],
+            'eff_sc'       : a['eff_sc'],
+            'co_g_min'     : a['co_g_min'],
+            'pm_mg_min'    : a['pm_mg_min'],
+            'co_mjd'       : a['co_mjd'],
+            'pm_mjd'       : a['pm_mjd'],
+            'mce'          : a['mce'],
+            'puissance_cuisson_W': resultats[c]['thermique']['puissance_cuis_kW'] * 1000
+                                    if c in resultats else None,
+            'taux_combustion_g_min': resultats[c]['thermique']['taux_combustion_g_min']
+                                      if c in resultats else None,
         } for c, a in analyses.items()},
     }
     st.session_state.tests_accumules.append(entree)
@@ -1167,13 +1172,13 @@ def etape_5_rapport():
             if dernier:
                 if st.button('Terminer la série', type='primary', use_container_width=True,
                              key='btn_terminer_serie'):
-                    _enregistrer_test_courant(tier_global, analyses)
+                    _enregistrer_test_courant(tier_global, analyses, resultats)
                     st.session_state['serie_terminee'] = True
                     st.rerun()
             else:
                 if st.button('Enregistrer et passer au test suivant', type='primary',
                              use_container_width=True, key='btn_suivant_test'):
-                    _enregistrer_test_courant(tier_global, analyses)
+                    _enregistrer_test_courant(tier_global, analyses, resultats)
                     st.session_state.etape = 6
                     st.rerun()
 

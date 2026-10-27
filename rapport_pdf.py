@@ -24,7 +24,8 @@ from fpdf.fonts import FontFace
 
 from calculs import MSE_PM
 from interpretation import (TIER_COUL, TIER_LABEL, SEUILS_CO_G_MJD,
-                             SEUILS_PM_MG_MJD, generer_recommandations)
+                             SEUILS_PM_MG_MJD, SEUILS_EFF_PCT,
+                             _tier_inferieur, _tier_eff, generer_recommandations)
 
 APP_VERSION = '1.0'
 
@@ -50,6 +51,46 @@ PHASE_NOM  = {'HP': 'Haute Puissance', 'MP': 'Moyenne Puissance', 'BP': 'Basse P
 
 SEUILS_NIVEAU = {5: 'Le plus performant', 4: 'Très bon', 3: 'Bon',
                   2: 'Intermédiaire', 1: 'Basique', 0: 'Hors seuils'}
+
+# ─────────────────────────────────────────────────────────────────────────
+# Statistiques de série — Moyenne / Écart-type / IC 90%
+# ─────────────────────────────────────────────────────────────────────────
+# Valeur t de Student (bilatéral, 90%, ddof=N-1) pour petits échantillons
+# (N=3 à 5 typique ISO 19867-1). Méthode statistique STANDARD — aucune
+# formule n'est documentée dans les fichiers du projet/labo pour ce calcul
+# (vérifié le 2026-10-27 : manuel ISO LEMS + questionnaires du labo ne
+# contiennent que la mention "IC 90%" sans formule). À confirmer avec le
+# labo si une méthode différente est utilisée.
+_T_CRIT_90 = {2: 6.314, 3: 2.920, 4: 2.353, 5: 2.132, 6: 2.015,
+              7: 1.943, 8: 1.895, 9: 1.860, 10: 1.833}
+
+
+def _mean_sd_ci90(vals):
+    """Retourne (moyenne, écart-type ddof=1, borne_basse_IC90, borne_haute_IC90).
+    N=1 : écart-type et IC = la valeur elle-même (pas de dispersion calculable).
+    N>10 : t fixé à la valeur N=10 (conservateur, approche la loi normale)."""
+    import numpy as np
+    n = len(vals)
+    if n == 0:
+        return None
+    moyenne = float(np.mean(vals))
+    if n == 1:
+        return moyenne, 0.0, moyenne, moyenne
+    sd = float(np.std(vals, ddof=1))
+    t_crit = _T_CRIT_90.get(n, _T_CRIT_90[10])
+    marge = t_crit * sd / (n ** 0.5)
+    return moyenne, sd, moyenne - marge, moyenne + marge
+
+
+def _combine_egal(valeurs_par_phase):
+    """Moyenne simple (pondération égale 1/1/1, conforme aux poids par défaut
+    des classeurs labo officiels, feuille ISO 'Weighting for voluntary
+    performance Tiers') des 3 phases HP/MP/BP d'UN test. None si une phase
+    manque pour ce test."""
+    vals = [valeurs_par_phase.get(c) for c in ('HP', 'MP', 'BP')]
+    if any(v is None for v in vals):
+        return None
+    return sum(vals) / len(vals)
 
 PAGE_W = 210.0
 MARGE  = 15.0
@@ -744,44 +785,145 @@ def generer_rapport_serie(ctx, tests_accumules, dernier_analyses, dernier_result
     _page_resultats_phases(pdf, ctx, dernier_analyses, dernier_resultats, tier_global)
     _page_recommandations(pdf, ctx, dernier_analyses, dernier_resultats, est_serie=True)
 
-    # ── Page supplémentaire : statistiques de série ─────────────────
+    # ── Page supplémentaire : statistiques de série (format ISO 19867-1) ──
     pdf.add_page()
     pdf.section_title('9', 'STATISTIQUES DE LA SÉRIE')
     pdf.set_font(pdf.FONT, '', 9)
+    n_tests = len(tests_accumules)
     pdf.multi_cell(LARGEUR_UTILE, 4.4,
-                    f"{len(tests_accumules)} test(s) enregistré(s) pour le foyer "
-                    f"{_v(ctx, 'foyer_nom')}. Moyenne ± écart-type (ddof=1) par phase.",
+                    f"{n_tests} test(s) enregistré(s) pour le foyer {_v(ctx, 'foyer_nom')}. "
+                    f"Moyenne, écart-type et intervalle de confiance à 90% (loi de Student, "
+                    f"méthode statistique standard — aucune formule officielle du labo "
+                    f"n'est documentée pour ce calcul, à confirmer si besoin) par phase et "
+                    f"combiné (pondération égale HP/MP/BP). Performance/Tier calculé sur la "
+                    f"borne défavorable de l'IC 90% (borne basse pour l'efficacité, borne "
+                    f"haute pour CO/PM2,5) plutôt que sur la moyenne — approche conservatrice.",
                     new_x=XPos.LMARGIN, new_y=YPos.NEXT)
     pdf.ln(2)
 
-    import numpy as np
-    col_w = [24, 44, 44, 44, 24]
-    entete = FontFace(family=pdf.FONT, emphasis='B', size_pt=8.5, color='#FFFFFF', fill_color='#163F31')
-    normal = FontFace(family=pdf.FONT, size_pt=8.5, color='#262626')
-    with pdf.table(col_widths=col_w, borders_layout='ALL', line_height=5,
+    def _valeurs(champ):
+        """Pour un champ donné, retourne ({'HP':[...],'MP':[...],'BP':[...],'Combine':[...]})."""
+        out = {'HP': [], 'MP': [], 'BP': [], 'Combine': []}
+        for t in tests_accumules:
+            phases = t.get('phases', {})
+            par_phase = {}
+            for c in ('HP', 'MP', 'BP'):
+                v = phases.get(c, {}).get(champ)
+                if v is not None:
+                    out[c].append(v)
+                    par_phase[c] = v
+            comb = _combine_egal(par_phase)
+            if comb is not None:
+                out['Combine'].append(comb)
+        return out
+
+    def _fmt_cell(vals, decimales):
+        if not vals:
+            return ('—', '—', '—')
+        moyenne, sd, lo, hi = _mean_sd_ci90(vals)
+        ci_txt = fr(lo, decimales) + '-' + fr(hi, decimales) if len(vals) > 1 else '—'
+        return (fr(moyenne, decimales), fr(sd, decimales), ci_txt)
+
+    def _tier_eff_consv(vals):
+        if not vals:
+            return None
+        _, _, lo, _ = _mean_sd_ci90(vals)
+        return _tier_eff(lo)
+
+    def _tier_mjd_consv(vals, seuils):
+        if not vals:
+            return None
+        _, _, _, hi = _mean_sd_ci90(vals)
+        return _tier_inferieur(hi, seuils)
+
+    lignes = [
+        ('Efficacité thermique sans charbon résiduel (%)', 'eff_sc', 1,
+         lambda v: _tier_eff_consv(v['Combine'])),
+        ('Efficacité thermique avec charbon résiduel (%)', 'eff', 1,
+         lambda v: _tier_eff_consv(v['Combine'])),
+        ('Productivité énergétique du charbon (%)', None, 1, lambda v: None),
+        ('Productivité massique du charbon (%)', None, 1, lambda v: None),
+        ('Puissance de cuisson (kW)', 'puissance_cuisson_W_kw', 2, lambda v: None),
+        ('Taux de combustion (g/min)', 'taux_combustion_g_min', 1, lambda v: None),
+        ('PM2,5 par énergie utile (mg/MJd)', 'pm_mjd', 1,
+         lambda v: _tier_mjd_consv(v['Combine'], SEUILS_PM_MG_MJD)),
+        ('CO par énergie utile (g/MJd)', 'co_mjd', 2,
+         lambda v: _tier_mjd_consv(v['Combine'], SEUILS_CO_G_MJD)),
+        ('Sécurité (score)', None, 0, lambda v: None),
+    ]
+
+    col_w = [32, 14, 26, 26, 26, 28, 28]
+    entete = FontFace(family=pdf.FONT, emphasis='B', size_pt=7.5, color='#FFFFFF', fill_color='#163F31')
+    normal = FontFace(family=pdf.FONT, size_pt=7.5, color='#262626')
+    gras   = FontFace(family=pdf.FONT, emphasis='B', size_pt=7.5, color='#262626')
+    with pdf.table(col_widths=col_w, borders_layout='ALL', line_height=4.6,
                     text_align='CENTER', first_row_as_headings=True,
-                    headings_style=entete, padding=(1.2, 1.6)) as table:
+                    headings_style=entete, padding=(1.0, 1.2)) as table:
         row = table.row()
-        for h in ('Phase', 'Efficacité (%)', 'CO (g/MJd)', 'PM2,5 (mg/MJd)', 'N tests'):
+        for h in ('Métrique', '', 'Haute', 'Moyenne', 'Basse', 'Combiné', 'Performance (Tier)'):
             row.cell(h, style=entete)
-        for code in ('HP', 'MP', 'BP'):
-            vals_eff = [t['phases'][code]['eff'] for t in tests_accumules if code in t.get('phases', {})]
-            vals_co  = [t['phases'][code]['co_mjd'] for t in tests_accumules if code in t.get('phases', {})]
-            vals_pm  = [t['phases'][code]['pm_mjd'] for t in tests_accumules if code in t.get('phases', {})]
-            if not vals_eff:
+
+        for libelle, champ, dec, calc_tier in lignes:
+            if champ is None:
+                # Métrique non calculée par l'app (productivité charbon, sécurité) :
+                # affichée "n.d." plutôt qu'une valeur inventée.
+                row = table.row()
+                row.cell(libelle, style=gras)
+                row.cell('Moy.', style=normal)
+                for _ in range(4):
+                    row.cell('n.d.', style=normal)
+                row.cell('n.d.', style=normal)
+                row = table.row()
+                row.cell('', style=normal)
+                row.cell('ET', style=normal)
+                for _ in range(5):
+                    row.cell('n.d.', style=normal)
                 continue
-            if len(vals_eff) > 1:
-                eff_s = f'{fr(np.mean(vals_eff), 1)} ± {fr(np.std(vals_eff, ddof=1), 1)}'
-                co_s  = f'{fr(np.mean(vals_co), 2)} ± {fr(np.std(vals_co, ddof=1), 2)}'
-                pm_s  = f'{fr(np.mean(vals_pm), 1)} ± {fr(np.std(vals_pm, ddof=1), 1)}'
+
+            if champ == 'puissance_cuisson_W_kw':
+                donnees = _valeurs('puissance_cuisson_W')
+                for k in donnees:
+                    donnees[k] = [v / 1000.0 for v in donnees[k]]
             else:
-                eff_s, co_s, pm_s = fr(vals_eff[0], 1), fr(vals_co[0], 2), fr(vals_pm[0], 1)
+                donnees = _valeurs(champ)
+
+            tier = calc_tier(donnees)
+            perf_txt = str(tier) if tier is not None else 'n.d.'
+
+            moy = {c: _fmt_cell(donnees[c], dec) for c in ('HP', 'MP', 'BP', 'Combine')}
+            n_eff = len(donnees['Combine'])
+
             row = table.row()
-            row.cell(code, style=normal)
-            row.cell(eff_s, style=normal)
-            row.cell(co_s, style=normal)
-            row.cell(pm_s, style=normal)
-            row.cell(str(len(vals_eff)), style=normal)
+            row.cell(libelle, style=gras)
+            row.cell('Moy.', style=normal)
+            for c in ('HP', 'MP', 'BP', 'Combine'):
+                row.cell(moy[c][0], style=(gras if c == 'Combine' else normal))
+            row.cell(perf_txt, style=gras)
+
+            row = table.row()
+            row.cell('', style=normal)
+            row.cell('ET', style=normal)
+            for c in ('HP', 'MP', 'BP', 'Combine'):
+                row.cell(moy[c][1], style=normal)
+            row.cell('', style=normal)
+
+            if n_eff > 1:
+                row = table.row()
+                row.cell('', style=normal)
+                row.cell('IC 90%', style=normal)
+                for c in ('HP', 'MP', 'BP', 'Combine'):
+                    row.cell(moy[c][2], style=normal)
+                row.cell('', style=normal)
+
+    pdf.ln(2)
+    pdf.set_font(pdf.FONT, 'I', 7.5)
+    pdf.set_text_color(*pdf._hex_rgb(GRIS_CLAIR))
+    pdf.multi_cell(LARGEUR_UTILE, 3.6,
+                    "Productivité du charbon et score de Sécurité : non calculés par "
+                    "l'application (méthode non implémentée) — « n.d. » plutôt qu'une "
+                    "valeur approximative.",
+                    new_x=XPos.LMARGIN, new_y=YPos.NEXT)
+    pdf.set_text_color(*pdf._hex_rgb(GRIS_TEXTE))
 
     pdf.numero_rapport_footer = ctx.get('numero_rapport', '—')
     pdf.foyer_footer = _v(ctx, 'foyer_nom')
