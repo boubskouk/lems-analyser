@@ -40,7 +40,13 @@ PITOT_MASS    = 15.3        # constante empirique T1.xlsx
 # Format : (PCI kJ/kg,  fraction carbone)
 # ─────────────────────────────────────────────────────────────────────
 COMBUSTIBLES = {
-    'Bois dur moyen'      : (17829.0, 0.50),  # ISO standard (source: T1.xlsx Results row 74)
+    'Bois dur moyen'      : (19734.0, 0.50),  # "Average Hardwood" — feuille "Calorific Values"
+                                                # des classeurs labo officiels (RWEDP Report 29 /
+                                                # Cheremisinoff 1980), confirmé identique dans les
+                                                # 5 fichiers labo (ECOA, Jambar, Noflaye A/B/C,
+                                                # 2026-10-27). L'ancien 17829 venait du calcul d'UN
+                                                # seul test réel (T1.xlsx, foyer Kevin), pas d'une
+                                                # vraie moyenne "bois dur" générique malgré son nom.
     'Bois tendre moyen'   : (20817.0, 0.50),
     'Charbon de bois'     : (28200.0, 0.78),  # PCI NET (Net CV) — pas le PCI brut (Gross CV=29400)
     'LPG'                 : (48000.0, 0.82),
