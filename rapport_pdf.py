@@ -368,7 +368,8 @@ class _RapportPDF(FPDF):
 # Page 1 — Identification + Résultat principal
 # ─────────────────────────────────────────────────────────────────────────
 
-def _page_identification_et_resultat(pdf, ctx, analyses, tier_global, test_label):
+def _page_identification_et_resultat(pdf, ctx, analyses, tier_global, test_label,
+                                      inclure_resultat_principal=True):
     pdf.add_page()
     pdf.numero_rapport_footer = ctx.get('numero_rapport', '—')
     pdf.foyer_footer = _v(ctx, 'foyer_nom')
@@ -500,6 +501,9 @@ def _page_identification_et_resultat(pdf, ctx, analyses, tier_global, test_label
     ]
     pdf.kv_table(lignes)
     pdf.ln(3)
+
+    if not inclure_resultat_principal:
+        return
 
     # ── 2. Résultat principal ───────────────────────────────────────
     pdf.section_title('2', 'RÉSULTAT PRINCIPAL')
@@ -705,23 +709,25 @@ _CATEGORIES_RENOMMEES = {
 }
 
 
-def _page_recommandations(pdf, ctx, analyses, resultats, est_serie):
+def _page_recommandations(pdf, ctx, analyses, resultats, est_serie,
+                           inclure_recommandations=True, num_remarques='7', num_validation='8'):
     pdf.add_page()
 
-    pdf.section_title('6', 'RECOMMANDATIONS')
-    pdf.set_font(pdf.FONT, '', 9)
-    for cat, texte in generer_recommandations(analyses):
-        cat_propre = _strip_emoji(cat)
-        cat_propre = _CATEGORIES_RENOMMEES.get(cat_propre, cat_propre)
-        pdf.set_x(MARGE)
-        pdf.set_font(pdf.FONT, 'B', 9)
-        pdf.write(4.6, f'{cat_propre}. ')
+    if inclure_recommandations:
+        pdf.section_title('6', 'RECOMMANDATIONS')
         pdf.set_font(pdf.FONT, '', 9)
-        pdf.write(4.6, texte)
-        pdf.ln(5.8)
-    pdf.ln(2)
+        for cat, texte in generer_recommandations(analyses):
+            cat_propre = _strip_emoji(cat)
+            cat_propre = _CATEGORIES_RENOMMEES.get(cat_propre, cat_propre)
+            pdf.set_x(MARGE)
+            pdf.set_font(pdf.FONT, 'B', 9)
+            pdf.write(4.6, f'{cat_propre}. ')
+            pdf.set_font(pdf.FONT, '', 9)
+            pdf.write(4.6, texte)
+            pdf.ln(5.8)
+        pdf.ln(2)
 
-    pdf.section_title('7', 'REMARQUES ET LIMITES')
+    pdf.section_title(num_remarques, 'REMARQUES ET LIMITES')
     pdf.set_font(pdf.FONT, '', 9)
     for remarque in _texte_remarques(ctx, resultats, est_serie):
         pdf.set_x(MARGE)
@@ -730,7 +736,7 @@ def _page_recommandations(pdf, ctx, analyses, resultats, est_serie):
         pdf.ln(0.8)
     pdf.ln(2)
 
-    pdf.section_title('8', 'VALIDATION')
+    pdf.section_title(num_validation, 'VALIDATION')
     cases = [
         ("Opérateur de l'essai", _rejoindre([ctx.get('operateur_nom'), ctx.get('operateur_fonction')], sep=', ')),
         ('Vérifié par', _rejoindre([ctx.get('verificateur_nom'), ctx.get('verificateur_fonction')], sep=', ')),
@@ -779,20 +785,22 @@ def generer_rapport_test(analyses, resultats, ctx):
 
 
 def generer_rapport_serie(ctx, tests_accumules, dernier_analyses, dernier_resultats):
-    """Rapport de fin de série : mêmes sections que le rapport de test (sur la
-    base du dernier test effectué) + un tableau récapitulatif de tous les
-    tests de la série avec moyenne ± écart-type par phase."""
+    """Rapport de fin de série : identification du foyer + UNIQUEMENT le
+    tableau récapitulatif de tous les tests de la série (Moyenne/ET/IC90%
+    par phase et combiné, format ISO 19867-1) — pas le détail d'un test
+    individuel pris isolément (chaque test a déjà son propre rapport
+    téléchargeable séparément ; répéter son détail ici n'apportait rien
+    et entretenait la confusion entre "ce test" et "la série")."""
     tier_global = min(a['t_iwa11'] for a in dernier_analyses.values())
     ctx = dict(ctx)
     ctx['nb_tests_enregistres'] = len(tests_accumules)
     pdf = _RapportPDF()
-    _page_identification_et_resultat(pdf, ctx, dernier_analyses, tier_global, None)
-    _page_resultats_phases(pdf, ctx, dernier_analyses, dernier_resultats, tier_global)
-    _page_recommandations(pdf, ctx, dernier_analyses, dernier_resultats, est_serie=True)
+    _page_identification_et_resultat(pdf, ctx, dernier_analyses, tier_global, None,
+                                      inclure_resultat_principal=False)
 
-    # ── Page supplémentaire : statistiques de série (format ISO 19867-1) ──
+    # ── 2. Statistiques de série (format ISO 19867-1) ───────────────
     pdf.add_page()
-    pdf.section_title('9', 'STATISTIQUES DE LA SÉRIE')
+    pdf.section_title('2', 'STATISTIQUES DE LA SÉRIE')
     pdf.set_font(pdf.FONT, '', 9)
     n_tests = len(tests_accumules)
     pdf.multi_cell(LARGEUR_UTILE, 4.4,
@@ -941,6 +949,14 @@ def generer_rapport_serie(ctx, tests_accumules, dernier_analyses, dernier_result
                     "valeur approximative.",
                     new_x=XPos.LMARGIN, new_y=YPos.NEXT)
     pdf.set_text_color(*pdf._hex_rgb(GRIS_TEXTE))
+
+    # ── 3. Remarques et limites · 4. Validation ──────────────────────
+    # Pas de § 6 Recommandations ici : ces recommandations sont dérivées
+    # de l'analyse d'UN test précis (le dernier) et n'ont pas leur place
+    # dans un rapport qui résume la série entière — chaque test a déjà
+    # ses propres recommandations dans son rapport individuel.
+    _page_recommandations(pdf, ctx, dernier_analyses, dernier_resultats, est_serie=True,
+                           inclure_recommandations=False, num_remarques='3', num_validation='4')
 
     pdf.numero_rapport_footer = ctx.get('numero_rapport', '—')
     pdf.foyer_footer = _v(ctx, 'foyer_nom')
