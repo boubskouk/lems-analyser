@@ -379,16 +379,16 @@ def _page_identification_et_resultat(pdf, ctx, analyses, tier_global, test_label
         pdf.genere_footer = (f"Généré le {genere_le.strftime('%d/%m/%Y à %H:%M')} · "
                               f"LEMS Analyser v{APP_VERSION}")
 
-    # ── Entête UCAD + CERER ──────────────────────────────────────────
+    # ── Entête CERER (gauche) + UCAD (droite) ────────────────────────
     y0 = pdf.get_y()
-    if os.path.exists(_LOGO_UCAD_PATH):
-        try:
-            pdf.image(_LOGO_UCAD_PATH, x=MARGE, y=y0, w=12)
-        except Exception:
-            pass
     if os.path.exists(_LOGO_PATH):
         try:
-            pdf.image(_LOGO_PATH, x=MARGE + 13, y=y0, w=14)
+            pdf.image(_LOGO_PATH, x=MARGE, y=y0, w=14)
+        except Exception:
+            pass
+    if os.path.exists(_LOGO_UCAD_PATH):
+        try:
+            pdf.image(_LOGO_UCAD_PATH, x=MARGE + 15, y=y0, w=12)
         except Exception:
             pass
     x_gauche = MARGE + 29
