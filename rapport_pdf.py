@@ -32,7 +32,7 @@ APP_VERSION = '1.0'
 _DIR = os.path.dirname(os.path.abspath(__file__))
 _FONTS_DIR = os.path.join(_DIR, 'assets', 'fonts')
 _LOGO_PATH = os.path.join(_DIR, 'assets', 'logo-cerer.png')
-_LOGO_UCAD_PATH = os.path.join(_DIR, 'assets', 'logo-ucad.png')
+_LOGO_UCAD_PATH = os.path.join(_DIR, 'assets', 'logo-ucad-circle.png')
 
 # ─────────────────────────────────────────────────────────────────────────
 # Palette
@@ -379,58 +379,42 @@ def _page_identification_et_resultat(pdf, ctx, analyses, tier_global, test_label
         pdf.genere_footer = (f"Généré le {genere_le.strftime('%d/%m/%Y à %H:%M')} · "
                               f"LEMS Analyser v{APP_VERSION}")
 
-    # ── Entête CERER (gauche) + UCAD (droite) ────────────────────────
+    # ── Entête : logo CERER (gauche) + texte CERER (centré) + logo UCAD (droite) ──
     y0 = pdf.get_y()
+    LARG_LOGO_CERER = 29.0
+    LARG_LOGO_UCAD = 21.0
     if os.path.exists(_LOGO_PATH):
         try:
-            pdf.image(_LOGO_PATH, x=MARGE, y=y0, w=14)
+            pdf.image(_LOGO_PATH, x=MARGE, y=y0, w=LARG_LOGO_CERER)
         except Exception:
             pass
+    x_ucad = PAGE_W - MARGE - LARG_LOGO_UCAD
     if os.path.exists(_LOGO_UCAD_PATH):
         try:
-            pdf.image(_LOGO_UCAD_PATH, x=MARGE + 15, y=y0, w=12)
+            pdf.image(_LOGO_UCAD_PATH, x=x_ucad, y=y0, w=LARG_LOGO_UCAD)
         except Exception:
             pass
-    x_gauche = MARGE + 29
-    larg_gauche = 74
-    larg_droite = 62
-    x_droite = PAGE_W - MARGE - larg_droite
-    pdf.set_xy(x_gauche, y0)
-    pdf.set_font(pdf.FONT, 'B', 10)
+    x_centre = MARGE + LARG_LOGO_CERER
+    larg_centre = x_ucad - x_centre
+    pdf.set_xy(x_centre, y0 + 2)
+    pdf.set_font(pdf.FONT, 'B', 14)
     pdf.set_text_color(22, 63, 49)
-    pdf.multi_cell(larg_gauche, 4.3,
+    pdf.multi_cell(larg_centre, 5.3,
                     "Centre d'Études et de Recherches sur les Énergies Renouvelables (CERER)",
-                    new_x=XPos.LMARGIN, new_y=YPos.NEXT)
-    pdf.set_xy(x_gauche, pdf.get_y())
-    pdf.set_font(pdf.FONT, '', 7.8)
+                    align='C', new_x=XPos.LMARGIN, new_y=YPos.NEXT)
+    pdf.set_xy(x_centre, pdf.get_y() + 1)
+    pdf.set_font(pdf.FONT, '', 9)
     pdf.set_text_color(89, 89, 89)
-    pdf.multi_cell(larg_gauche, 3.7,
+    pdf.multi_cell(larg_centre, 4.3,
                     "Laboratoire de biomasse-énergie · Division Bioénergie et Environnement\n"
                     "Université Cheikh Anta Diop de Dakar · Dakar, Sénégal",
-                    new_x=XPos.LMARGIN, new_y=YPos.NEXT)
-    coord = _rejoindre([ctx.get('cerer_adresse'), ctx.get('cerer_telephone'),
-                         ctx.get('cerer_courriel')], defaut='')
-    if coord:
-        pdf.set_xy(x_gauche, pdf.get_y())
-        pdf.set_font(pdf.FONT, '', 7.3)
-        pdf.cell(larg_gauche, 3.5, coord, new_x=XPos.LMARGIN, new_y=YPos.NEXT)
-    y_gauche_fin = pdf.get_y()
+                    align='C', new_x=XPos.LMARGIN, new_y=YPos.NEXT)
+    y_centre_fin = pdf.get_y()
 
-    pdf.set_xy(x_droite, y0)
-    pdf.set_font(pdf.FONT, 'B', 9.5)
-    pdf.set_text_color(38, 38, 38)
-    pdf.multi_cell(larg_droite, 4.2, f"Rapport d'essai n° {ctx.get('numero_rapport', '—')}",
-                    align='R', new_x=XPos.LMARGIN, new_y=YPos.NEXT)
-    pdf.set_xy(x_droite, pdf.get_y())
-    pdf.set_font(pdf.FONT, '', 8)
-    pdf.set_text_color(89, 89, 89)
     date_emission = ctx.get('date_emission')
     date_emission_s = date_emission.strftime('%d/%m/%Y') if date_emission else '—'
-    pdf.multi_cell(larg_droite, 3.8, f"Date d'émission : {date_emission_s}\nVersion : 1",
-                    align='R', new_x=XPos.LMARGIN, new_y=YPos.NEXT)
-    y_droite_fin = pdf.get_y()
 
-    pdf.set_y(max(y_gauche_fin, y_droite_fin, y0 + 22) + 2)
+    pdf.set_y(max(y_centre_fin, y0 + LARG_LOGO_CERER / 1.388, y0 + LARG_LOGO_UCAD) + 2)
     pdf.set_draw_color(31, 92, 69)
     pdf.set_line_width(0.6)
     pdf.line(MARGE, pdf.get_y(), PAGE_W - MARGE, pdf.get_y())
@@ -445,7 +429,15 @@ def _page_identification_et_resultat(pdf, ctx, analyses, tier_global, test_label
     pdf.cell(0, 5, 'Protocole Water Boiling Test (WBT) · Norme ISO 19867-1:2018 · '
                     'Classement par Tiers (cibles volontaires, 0 à 5)',
               new_x=XPos.LMARGIN, new_y=YPos.NEXT)
-    pdf.ln(2)
+    pdf.set_x(MARGE)
+    pdf.set_font(pdf.FONT, '', 9)
+    pdf.set_text_color(38, 38, 38)
+    pdf.write(5, "Rapport d'essai n° ")
+    pdf.set_font(pdf.FONT, 'B', 9)
+    pdf.write(5, ctx.get('numero_rapport', '—'))
+    pdf.set_font(pdf.FONT, '', 9)
+    pdf.write(5, f"  ·  Date d'émission : {date_emission_s}  ·  Version : 1")
+    pdf.ln(6)
 
     # ── 1. Identification ───────────────────────────────────────────
     pdf.section_title('1', 'IDENTIFICATION')

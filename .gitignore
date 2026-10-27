@@ -16,6 +16,7 @@ __pycache__/
 *.PNG
 !assets/logo-cerer.png
 !assets/logo-ucad.png
+!assets/logo-ucad-circle.png
 *.jpeg
 *.jpg
 *.avif
