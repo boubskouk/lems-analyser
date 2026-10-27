@@ -66,18 +66,32 @@ FUELS_AVEC_RESIDU_CHARBONNEUX = {'Bois dur moyen', 'Bois tendre moyen'}
 
 # Conversion PM scattering → concentration massique :
 # cal_pm (ligne #0 CSV) est un facteur scattering [1/Mm / logunit].
-# PM_ug/m³ = PM_scat_zeroed (1/Mm) / (MSE × 1e-3)
-# MSE = 3 m²/g  ← T1.xlsx Assumptions L6 ; donne facteur 0.003
-# ATTENTION (2026-10-16) : T1.xlsx ne se contente PAS de ce facteur fixe pour son
-# résultat final — il dérive une MSE propre à chaque phase à partir du filtre
-# gravimétrique pesé (ISO!M39 net filter mass / débit supposé 17,397 LPM, comparé au
-# coefficient de diffusion moyen de la phase), puis l'applique à la trace optique
-# seconde par seconde (Logger Data col R). Cette MSE dérivée varie de 0,0026 à 0,033
-# m²/g sur un seul test (foyer Kevin) — un facteur fixe unique ne peut PAS reproduire
-# T1.xlsx sans données de filtre gravimétrique propres à chaque test. Voir le point 5
-# de LEMS-Analyser-Questions-maitre-de-stage.docx.
-MSE_PM            = 3.0        # Mass Scattering Efficiency (m²/g) — T1.xlsx Assumptions L6
-_MSE_FACTOR       = MSE_PM * 1e-3  # facteur effectif pour 1/Mm → ug/m³
+#
+# Historique : la formule de mai 2026 (PM_ug = scat_zeroed / (MSE × 1e-3)) n'a
+# JAMAIS été validée contre une référence indépendante — voir compare_excel.py,
+# section "SYNTHÈSE DES DIVERGENCES", où ce point est explicitement marqué
+# CRITIQUE et le PM total T1.xlsx "Non calculable" (pipeline PM à 2 étapes
+# jamais bouclé). Le ×1e-3 était une supposition, pas une formule confirmée.
+#
+# Formule corrigée et VALIDÉE le 2026-10-27 contre les fichiers labo officiels
+# (Jambar charbon T1-T5, 13 phases/15 à exactement 0,000% d'écart, QC filtre
+# "Pass" requis) :
+#   PM (µg/m³) = scat_zeroed (1/Mm) / MSE (m²/g)        ← PAS de ×1e-3
+# Le MSE n'est PAS une constante universelle : il est dérivé PAR PHASE à partir
+# de la pesée du filtre gravimétrique (masse nette en g, débit pompe fixe
+# GRAVIMETRIC_FLOW_LPM, durée de la phase), comparé à la moyenne du signal
+# optique zérotê sur cette même fenêtre :
+#   PM_gravimétrique (µg/m³) = masse_nette_filtre(g) × 1e9 / (débit_LPM × durée_min)
+#   MSE_phase (m²/g)         = scat_zeroed_moyen(1/Mm) / PM_gravimétrique(µg/m³)
+# Le MSE réel observé varie énormément selon la phase/le test (0,002 à 0,075 m²/g
+# sur Jambar charbon) — très différent de la valeur "hypothèse de départ" 3,0 du
+# classeur labo (feuille "Assumptions and QC"), qui ne sert que de repli quand
+# aucun filtre n'a été pesé (voir calculer_taux_emission).
+MSE_PM                = 3.0      # Repli si pas de filtre pesé — hypothèse par défaut du labo
+                                  # (feuille "Assumptions and QC"), pas une valeur mesurée.
+GRAVIMETRIC_FLOW_LPM  = 17.397   # Débit pompe échantillonnage filtre (L/min) — constante
+                                  # instrument, "Assumptions and QC" D23, confirmée identique
+                                  # sur tous les tests/phases vérifiés (Jambar charbon).
 
 # ─────────────────────────────────────────────────────────────────────
 # Tier ISO 19867-1:2018 Tableau 1 (Objectifs de performances volontaires)
@@ -161,7 +175,9 @@ def calculer_taux_emission(df_cal: pd.DataFrame,
                            bg_pm_ug: float = 0.0,
                            bg_co_ppm: float = 0.0,
                            bg_co2_ppm: float = 0.0,
-                           p_Pa: float = 101325.0) -> pd.DataFrame:
+                           p_Pa: float = 101325.0,
+                           net_filter_mg: float = None,
+                           duree_min: float = None) -> pd.DataFrame:
     """
     Calcule les taux d'émission instantanés de CO, PM et CO₂.
 
@@ -172,6 +188,11 @@ def calculer_taux_emission(df_cal: pd.DataFrame,
     bg_co2_ppm : CO₂ de fond (ppm) — soustrait. T1.xlsx col 40 "Zeroed CO2".
                  Valeur typique ≈ 615 ppm (ambiante avant allumage).
     p_Pa       : pression atmosphérique (Pa).
+    net_filter_mg : masse nette du filtre gravimétrique (après − avant, mg).
+                    Si fourni (>0) avec duree_min, dérive un MSE propre à
+                    cette phase au lieu d'utiliser le repli MSE_PM=3,0.
+    duree_min  : durée de la phase (min) — nécessaire pour dériver le MSE
+                    depuis le filtre (débit pompe fixe × durée = volume échantillonné).
     """
     df = df_cal.copy()
 
@@ -185,11 +206,21 @@ def calculer_taux_emission(df_cal: pd.DataFrame,
     debit_m3_min = calculer_debit_tunnel(df['Flow'], flue_temp_C, baseline_flow, p_Pa)
     df['debit_m3_min'] = debit_m3_min
 
-    # PM pipeline 2 étapes (T1.xlsx Assumptions L6) :
+    # PM pipeline 2 étapes :
     #   df['PM'] est en 1/Mm après appliquer_calibration (cal_pm = facteur scattering).
     #   bg_pm_ug est aussi en 1/Mm (bg_PM_log × cal_pm dans app.py).
-    #   Étape 2 : PM_scat_zeroed (1/Mm) → PM_ug/m³ via MSE = 3 m²/g
-    df['PM_ug_zeroed'] = (df['PM'] - bg_pm_ug).clip(lower=0) / _MSE_FACTOR
+    #   Étape 2 : PM_scat_zeroed (1/Mm) → PM_ug/m³ via MSE (m²/g), dérivé du filtre
+    #   gravimétrique si pesé, sinon repli sur MSE_PM=3,0 (voir commentaires plus haut).
+    scat_zeroed = (df['PM'] - bg_pm_ug).clip(lower=0)
+
+    mse_effectif = MSE_PM
+    if net_filter_mg is not None and net_filter_mg > 0 and duree_min and duree_min > 0:
+        pm_gravimetrique_ug_m3 = net_filter_mg * 1e6 / (GRAVIMETRIC_FLOW_LPM * duree_min)
+        scat_moyen = scat_zeroed.mean()
+        if pm_gravimetrique_ug_m3 > 0 and scat_moyen > 0:
+            mse_effectif = scat_moyen / pm_gravimetrique_ug_m3
+
+    df['PM_ug_zeroed'] = scat_zeroed / mse_effectif
     df['PM_mg_m3']     = df['PM_ug_zeroed'] / 1000.0
 
     # Correction température : T1.xlsx utilise le débit molaire à la température réelle
@@ -494,15 +525,23 @@ def analyser(resultat_csv: dict, donnees_ext: dict = None) -> dict:
 
     p_Pa = donnees_ext.get('p_Pa', 101325.0)
 
-    df_cal  = appliquer_calibration(df_brut, calibr)
-    df_taux = calculer_taux_emission(df_cal, baseline_flow, T_atm,
-                                     bg_pm_ug, bg_co_ppm, bg_co2_ppm, p_Pa)
-    totaux  = integrer_emissions(df_taux)
-
     duree_s   = float(df_brut['seconds'].max() - df_brut['seconds'].min())
     duree_min = duree_s / 60.0
     if 'duree_min' not in donnees_ext:
         donnees_ext['duree_min'] = duree_min
+
+    # Filtre gravimétrique (pesée avant/après) — permet de dériver un MSE propre
+    # à cette phase pour le calcul du PM au lieu du repli constant MSE_PM.
+    filtre_avant_mg = donnees_ext.get('filtre_avant_mg', 0.0) or 0.0
+    filtre_apres_mg = donnees_ext.get('filtre_apres_mg', 0.0) or 0.0
+    net_filter_mg = (filtre_apres_mg - filtre_avant_mg
+                      if filtre_apres_mg > filtre_avant_mg else None)
+
+    df_cal  = appliquer_calibration(df_brut, calibr)
+    df_taux = calculer_taux_emission(df_cal, baseline_flow, T_atm,
+                                     bg_pm_ug, bg_co_ppm, bg_co2_ppm, p_Pa,
+                                     net_filter_mg, duree_min)
+    totaux  = integrer_emissions(df_taux)
 
     thermique  = calculer_metriques_thermiques(df_cal, donnees_ext)
     normalises = calculer_metriques_normalisees(totaux, thermique, duree_min)
