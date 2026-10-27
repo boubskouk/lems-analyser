@@ -42,7 +42,7 @@ PITOT_MASS    = 15.3        # constante empirique T1.xlsx
 COMBUSTIBLES = {
     'Bois dur moyen'      : (17829.0, 0.50),  # ISO standard (source: T1.xlsx Results row 74)
     'Bois tendre moyen'   : (20817.0, 0.50),
-    'Charbon de bois'     : (29400.0, 0.78),
+    'Charbon de bois'     : (28200.0, 0.78),  # PCI NET (Net CV) — pas le PCI brut (Gross CV=29400)
     'LPG'                 : (48000.0, 0.82),
     'Kérosène'            : (43300.0, 0.86),
     'Charbon minéral'     : (24700.0, 0.75),
@@ -242,9 +242,21 @@ def integrer_emissions(df: pd.DataFrame) -> dict:
 def calculer_metriques_thermiques(df_cal: pd.DataFrame, ext: dict) -> dict:
     """
     Paramètres ext :
-        type_combustible    : clé du dict COMBUSTIBLES
-        masse_bois_kg       : masse combustible initial (kg, humide)
-        masse_charbon_kg    : masse résidu charbon après test (kg)
+        type_combustible       : clé du dict COMBUSTIBLES
+        masse_bois_kg          : masse combustible initial (kg, humide)
+        masse_charbon_kg       : masse résidu combustible en fin de phase (kg, humide) —
+                                  bois non brûlé + charbon mélangés, sert uniquement au
+                                  bilan massique (combustible brûlé = chargé − résidu).
+        masse_charbon_produit_kg : masse de CHARBON SEUL produit par la combustion (kg,
+                                  humide), pesée séparément (conteneur+charbon avant/après,
+                                  comme le fait le classeur labo officiel). Optionnel — sans
+                                  cette valeur, aucun crédit d'énergie charbon n'est appliqué
+                                  (eff_avec_char == eff_sans_char), plutôt que de supposer à
+                                  tort que tout le résidu pesé est du charbon pur.
+        pci_custom_kJ_kg        : PCI net (kJ/kg) mesuré pour ce combustible précis, prioritaire
+                                  sur la valeur par défaut du type de combustible sélectionné.
+        pci_char_custom_kJ_kg   : PCI net (kJ/kg) du charbon produit, spécifique à ce test,
+                                  prioritaire sur la constante HHV_CHARBON par défaut.
         humidite_pct        : teneur en humidité base humide (%)
         pots                : liste de dicts {masse_eau, T_debut, T_fin}
         T_atm               : température ambiante (°C)
@@ -252,12 +264,16 @@ def calculer_metriques_thermiques(df_cal: pd.DataFrame, ext: dict) -> dict:
     """
     masse_bois    = ext.get('masse_bois_kg', 0.0)
     masse_charbon = ext.get('masse_charbon_kg', 0.0)
+    masse_charbon_produit = ext.get('masse_charbon_produit_kg', 0.0) or 0.0
     humidite_pct  = ext.get('humidite_pct', 0.0)
     T_atm         = ext.get('T_atm', 25.0)
     duree_min     = ext.get('duree_min', 1.0)
 
     type_comb = ext.get('type_combustible', 'Bois dur moyen')
     pci, frac_c = COMBUSTIBLES.get(type_comb, (PCI_DEFAUT, FRAC_C_DEFAUT))
+    pci_custom = ext.get('pci_custom_kJ_kg')
+    if pci_custom:
+        pci = pci_custom
 
     # Masse sèche (base humide → sèche)
     masse_bois_sec    = masse_bois    * (1.0 - humidite_pct / 100.0)
@@ -267,8 +283,21 @@ def calculer_metriques_thermiques(df_cal: pd.DataFrame, ext: dict) -> dict:
     # Énergie combustible brûlé
     Q_combustible = bois_brule_sec * pci             # kJ
 
-    # Énergie résiduelle dans le charbon
-    Q_char = masse_charbon_sec * HHV_CHARBON          # kJ
+    # Énergie résiduelle dans le charbon RÉELLEMENT produit (pesée séparée).
+    # ATTENTION : ne PAS utiliser masse_charbon_sec (résidu total = bois non brûlé +
+    # charbon mélangés) ici — ce serait supposer à tort que 100% du résidu est du
+    # charbon pur, ce qui surestime massivement Q_char (bug corrigé le 2026-10-27,
+    # confirmé par comparaison avec 5 foyers bois × 5 tests : écarts +194% à +3255%
+    # sur "Eff. avec charbon" avant correction).
+    # Pas de correction d'humidité ici : masse_charbon_produit_kg est la masse de
+    # charbon (déjà essentiellement sec/carbonisé) telle que pesée séparément — le taux
+    # d'humidité du combustible d'origine ne s'applique pas à son propre résidu
+    # carbonisé. Confirmé par comparaison avec le classeur officiel (foyers "Noflaye
+    # Jeeg" A et C, 2026-10-27) : appliquer la correction d'humidité ici introduit un
+    # écart résiduel de -0,18% à -1,15% ; sans elle, écart exactement 0,000%.
+    masse_charbon_produit_sec = masse_charbon_produit
+    pci_char = ext.get('pci_char_custom_kJ_kg') or HHV_CHARBON
+    Q_char = masse_charbon_produit_sec * pci_char  # kJ
 
     # Chaleur utile (somme des pots)
     pots = ext.get('pots', None)
@@ -284,11 +313,19 @@ def calculer_metriques_thermiques(df_cal: pd.DataFrame, ext: dict) -> dict:
     # Efficacité thermique ISO 19867 : dénominateur = combustible BRÛLÉ sec × PCI (pas le chargé initial)
     a_residu_charbonneux = type_comb in FUELS_AVEC_RESIDU_CHARBONNEUX
     eff_sans_char = (Q_utile / Q_combustible * 100.0) if Q_combustible > 0 else 0.0
-    if a_residu_charbonneux:
-        eff_avec_char = ((Q_utile + Q_char) / Q_combustible * 100.0) if Q_combustible > 0 else 0.0
+    if a_residu_charbonneux and Q_char > 0:
+        # Formule officielle Aprovecho (confirmée exacte à 0,000% d'écart sur 15 couples
+        # test×phase, foyer "Noflaye Jeeg", 2026-10-27) : le charbon produit réduit
+        # l'énergie combustible effectivement DÉPENSÉE (dénominateur), il n'est PAS un
+        # crédit ajouté à l'énergie utile (numérateur) — contrairement à la première
+        # version de ce correctif (eff = (Q_utile+Q_char)/Q_combustible), qui restait
+        # fausse de +7% à +47% même une fois la masse de charbon correctement saisie.
+        denom = Q_combustible - Q_char
+        eff_avec_char = (Q_utile / denom * 100.0) if denom > 0 else eff_sans_char
     else:
-        # Pas de notion de "résidu charbonneux" distincte pour ce combustible
-        # (le résidu pesé est du combustible non brûlé, pas un sous-produit à créditer).
+        # Pas de notion de "résidu charbonneux" distincte pour ce combustible, ou pas de
+        # charbon produit renseigné (le résidu pesé est du combustible non brûlé, pas un
+        # sous-produit à créditer).
         eff_avec_char = eff_sans_char
 
     # Puissances (kW)
@@ -305,6 +342,7 @@ def calculer_metriques_thermiques(df_cal: pd.DataFrame, ext: dict) -> dict:
     return {
         'masse_bois_sec_kg'       : round(masse_bois_sec, 4),
         'masse_charbon_sec_kg'    : round(masse_charbon_sec, 4),
+        'masse_charbon_produit_sec_kg': round(masse_charbon_produit_sec, 4),
         'bois_brule_sec_kg'       : round(bois_brule_sec, 4),
         'humidite_pct'            : round(humidite_pct, 2),
         'Q_utile_kJ'              : round(Q_utile, 2),
@@ -374,12 +412,51 @@ def calculer_mce(df_taux: pd.DataFrame) -> float:
 
 def calculer_tier(co_g_mjd: float, pm_mg_mjd: float) -> int:
     """Tier ISO 19867-1 à partir des émissions normalisées par énergie utile
-    (g/MJd, mg/MJd) — voir SEUILS_TIER."""
+    (g/MJd, mg/MJd) — voir SEUILS_TIER.
+
+    Robustesse (2026-10-18) : ne lève jamais d'exception.
+    - None ou NaN (CO et/ou PM) : renvoie 0 par défaut. Ce 0 est un Tier
+      "non calculable", pas un vrai résultat — voir detecter_anomalie_tier()
+      pour le message à afficher à l'utilisateur. Ces deux cas sont traités
+      AVANT tout clampage, car max(nan, 0.0) renvoie nan en Python (pas 0.0)
+      — on ne peut donc pas compter sur le clamp pour neutraliser un NaN.
+    - Valeur négative (CO et/ou PM, ex. après soustraction imparfaite du
+      bruit de fond) : classée comme si elle était 0. Cela NE CHANGE PAS le
+      chiffre retourné par rapport à avant (une valeur négative était déjà
+      sous tout seuil positif) — voir detecter_anomalie_tier() pour
+      l'avertissement, désormais disponible séparément.
+    """
+    if co_g_mjd is None or pm_mg_mjd is None:
+        return 0
+    if np.isnan(co_g_mjd) or np.isnan(pm_mg_mjd):
+        return 0
+    co_clamp = max(co_g_mjd, 0.0)
+    pm_clamp = max(pm_mg_mjd, 0.0)
     for tier in [5, 4, 3, 2, 1]:
         co_max, pm_max = SEUILS_TIER[tier]
-        if co_g_mjd < co_max and pm_mg_mjd < pm_max:
+        if co_clamp < co_max and pm_clamp < pm_max:
             return tier
     return 0
+
+
+def detecter_anomalie_tier(co_g_mjd, pm_mg_mjd):
+    """Décrit en texte une valeur CO/PM anormale avant classement Tier.
+    Purement informatif : ne change jamais le chiffre renvoyé par
+    calculer_tier(). Retourne None si rien à signaler.
+    """
+    for nom, val in (('CO', co_g_mjd), ('PM2,5', pm_mg_mjd)):
+        if val is None:
+            return (f"Tier non calculable (valeur de {nom} manquante) — "
+                    f"Tier affiché (0) à titre indicatif, à ne pas "
+                    f"interpréter comme un résultat réel.")
+        if np.isnan(val):
+            return (f"Tier non calculable (valeur de {nom} invalide : NaN) — "
+                    f"Tier affiché (0) à titre indicatif, à ne pas "
+                    f"interpréter comme un résultat réel.")
+    if co_g_mjd < 0 or pm_mg_mjd < 0:
+        return ("Valeur négative après soustraction du bruit de fond — "
+                "Tier à confirmer.")
+    return None
 
 
 # ═════════════════════════════════════════════════════════════════════
@@ -447,6 +524,7 @@ def analyser(resultat_csv: dict, donnees_ext: dict = None) -> dict:
     co_g_mjd  = normalises.get('CO_par_utile_g_MJ', 0.0)
     pm_mg_mjd = normalises.get('PM_par_utile_mg_MJ', 0.0)
     tier      = calculer_tier(co_g_mjd, pm_mg_mjd)
+    avertissement_tier = detecter_anomalie_tier(co_g_mjd, pm_mg_mjd)
 
     return {
         'df_brut'    : df_brut,
@@ -458,6 +536,7 @@ def analyser(resultat_csv: dict, donnees_ext: dict = None) -> dict:
         'normalises' : normalises,
         'tier'       : tier,
         'label_tier' : LABEL_TIER[tier],
+        'avertissement_tier': avertissement_tier,
         'duree_s'    : round(duree_s, 1),
         'duree_min'  : round(duree_min, 2),
     }

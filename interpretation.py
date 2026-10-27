@@ -52,11 +52,41 @@ MCE_SEUILS = [
 # ─────────────────────────────────────────────────────────────────────────────
 
 def _tier_inferieur(val, seuils):
-    """Retourne le Tier maximum dont le seuil est respecté (ordre décroissant)."""
+    """Retourne le Tier maximum dont le seuil est respecté (ordre décroissant).
+
+    Robustesse (2026-10-18) : None/NaN -> 0 (voir _avertissement_valeur()
+    pour le message à afficher). Ces deux cas sont traités AVANT tout
+    max(val, 0.0), car max(nan, 0.0) renvoie nan en Python (pas 0.0) — le
+    clamp seul ne neutraliserait pas un NaN. Valeur négative classée comme 0
+    (résultat numérique inchangé, une valeur négative étant déjà sous tout
+    seuil positif)."""
+    if val is None:
+        return 0
+    if val != val:  # NaN : seule valeur flottante telle que val != val
+        return 0
+    val = max(val, 0.0)
     for t in sorted(seuils.keys(), reverse=True):
         if val < seuils[t]:
             return t
     return 0
+
+
+def _avertissement_valeur(nom, val):
+    """Message d'avertissement si val est invalide ou négative, sinon None.
+    Purement informatif : ne change jamais le Tier renvoyé par
+    _tier_inferieur()."""
+    if val is None:
+        return (f"Tier non calculable (valeur de {nom} manquante) — Tier "
+                f"affiché (0) à titre indicatif, à ne pas interpréter "
+                f"comme un résultat réel.")
+    if val != val:  # NaN
+        return (f"Tier non calculable (valeur de {nom} invalide : NaN) — "
+                f"Tier affiché (0) à titre indicatif, à ne pas interpréter "
+                f"comme un résultat réel.")
+    if val < 0:
+        return ("Valeur négative après soustraction du bruit de fond — "
+                "Tier à confirmer.")
+    return None
 
 def _tier_eff(eff_pct):
     for t in sorted(SEUILS_EFF_PCT.keys(), reverse=True):
@@ -91,6 +121,8 @@ def analyser_phase(code, r):
     t_co_mjd  = _tier_inferieur(co_mjd,    SEUILS_CO_G_MJD)
     t_pm_mjd  = _tier_inferieur(pm_mjd,    SEUILS_PM_MG_MJD)
     t_eff     = _tier_eff(eff)
+    avertissement_tier = (_avertissement_valeur('CO', co_mjd)
+                           or _avertissement_valeur('PM2,5', pm_mjd))
     # Tier global = seuils officiels ISO 19867-1 Tableau 1 (g/MJd, mg/MJd), confirmés
     # le 2026-10-16 contre le texte de la norme (photo). Les seuils g/min
     # (SEUILS_CO_G_MIN / SEUILS_PM_MG_MIN) restent affichés en info secondaire
@@ -130,6 +162,7 @@ def analyser_phase(code, r):
         'eff': eff, 'eff_sc': eff_sc, 't_eff': t_eff, 'a_residu_charbonneux': a_residu,
         'mce': mce, 'mce_label': _mce_label(mce),
         't_iwa11': t_iwa11, 'limitant': limitant,
+        'avertissement_tier': avertissement_tier,
         'vs_ref_eff': vs_ref_eff,
         'ref': ref,
         'duree_min': r['duree_min'],
@@ -478,6 +511,8 @@ def generer_texte(analyses, nom_fichier='', nom_testeur='', nom_fourneau='',
             f"- MCE : **{a['mce']:.2f}%** — {a['mce_label']}  \n"
             f"- ⚠️ Facteur limitant : {a['limitant']}"
         )
+        if a.get('avertissement_tier'):
+            txt += f"  \n- ⚠️ **{a['avertissement_tier']}**"
         lignes_phases.append(txt)
 
     if tier_global >= 4:

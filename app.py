@@ -16,7 +16,8 @@ import streamlit as st
 import plotly.graph_objects as go
 
 from import_csv import lire_csv
-from calculs import (analyser, COMBUSTIBLES,
+from calculs import (analyser, COMBUSTIBLES, PCI_DEFAUT, FRAC_C_DEFAUT,
+                     FUELS_AVEC_RESIDU_CHARBONNEUX, HHV_CHARBON,
                      appliquer_calibration, calculer_taux_emission)
 from visualisation import graphique_comparaison_calibration, tableau_calibration_df
 from interpretation import (analyser_phase, generer_texte, generer_recommandations,
@@ -101,7 +102,7 @@ def _reset_test_data():
         st.session_state.pop(k, None)
     for p in ('HP', 'MP', 'BP'):
         st.session_state.pop(f'intervalle_{p}', None)
-        for kk in (f'mb_{p}', f'mc_{p}', f'me_{p}', f'td_{p}', f'tf_{p}',
+        for kk in (f'mb_{p}', f'mc_{p}', f'cp_{p}', f'me_{p}', f'td_{p}', f'tf_{p}',
                    f'fa_{p}', f'fp_{p}'):
             st.session_state.pop(kk, None)
     st.session_state.resultats = {}
@@ -120,6 +121,26 @@ def render_sidebar_donnees_communes():
                 if s.get('type_combustible') in liste_comb else 0
             s['type_combustible'] = st.selectbox('Type de combustible', liste_comb,
                                                    index=idx, key='sb_tc')
+            pci_defaut, _ = COMBUSTIBLES.get(s['type_combustible'], (PCI_DEFAUT, FRAC_C_DEFAUT))
+            with st.expander('PCI personnalisé (optionnel)'):
+                st.caption(f'Valeur par défaut pour « {s["type_combustible"]} » : '
+                           f'{pci_defaut:.0f} kJ/kg (PCI net). Renseignez ci-dessous le PCI net '
+                           f'mesuré pour ce combustible précis si vous le connaissez — sinon '
+                           f'laissez à 0 pour utiliser la valeur par défaut.')
+                pci_saisi = st.number_input('PCI net mesuré (kJ/kg)', min_value=0.0,
+                                             value=float(s.get('pci_custom_kJ_kg') or 0.0),
+                                             step=10.0, format='%.0f', key='sb_pci_custom')
+                s['pci_custom_kJ_kg'] = pci_saisi if pci_saisi > 0 else None
+            if s['type_combustible'] in FUELS_AVEC_RESIDU_CHARBONNEUX:
+                with st.expander('PCI du charbon produit (optionnel)'):
+                    st.caption(f'Valeur par défaut : {HHV_CHARBON:.0f} kJ/kg (PCI net du charbon '
+                               f'résiduel). Ce PCI varie selon le combustible d\'origine — '
+                               f'renseignez la valeur mesurée pour ce test si vous la connaissez, '
+                               f'sinon laissez à 0.')
+                    pci_char_saisi = st.number_input('PCI net du charbon (kJ/kg)', min_value=0.0,
+                                                      value=float(s.get('pci_char_custom_kJ_kg') or 0.0),
+                                                      step=10.0, format='%.0f', key='sb_pci_char_custom')
+                    s['pci_char_custom_kJ_kg'] = pci_char_saisi if pci_char_saisi > 0 else None
             s['humidite_pct'] = st.number_input('Humidité combustible (%)', min_value=0.0,
                                                   max_value=100.0, value=float(s.get('humidite_pct', 12.0)),
                                                   step=0.5, format='%.1f', key='sb_hc')
@@ -187,6 +208,9 @@ def _lancer_analyse(phase, res_csv, nom_fichier, type_comb, hum_comb, T_atm, pre
         'type_combustible': type_comb,
         'masse_bois_kg'   : st.session_state[f'mb_{phase}'],
         'masse_charbon_kg': st.session_state[f'mc_{phase}'],
+        'masse_charbon_produit_kg': st.session_state.get(f'cp_{phase}', 0.0) or 0.0,
+        'pci_custom_kJ_kg': st.session_state.serie.get('pci_custom_kJ_kg'),
+        'pci_char_custom_kJ_kg': st.session_state.serie.get('pci_char_custom_kJ_kg'),
         'humidite_pct'    : hum_comb,
         'pots'            : pots,
         'T_atm'           : T_atm,
@@ -767,6 +791,17 @@ def _rendre_onglet_phase(phase, res_csv, nom_fichier, type_comb, hum_comb, T_atm
                 unsafe_allow_html=True)
         else:
             _avertir_hors_plage(mc, 0.0, 5.0, 'résidu combustible (kg)')
+        if type_comb in FUELS_AVEC_RESIDU_CHARBONNEUX:
+            cp = st.number_input('Dont charbon produit, pesée séparée (kg, optionnel)',
+                                  min_value=0.0, value=0.0, step=0.001, format='%.3f', key=f'cp_{phase}')
+            st.caption('Masse de CHARBON SEUL (conteneur + charbon pesé avant/après), pas le '
+                       'résidu total ci-dessus. Sans cette valeur, « Efficacité avec charbon » '
+                       'est identique à « Efficacité sans charbon » (aucun crédit énergétique '
+                       'n\'est supposé sans pesée réelle du charbon produit).')
+            if mc is not None and cp is not None and cp > mc:
+                st.markdown(msg_incoherence.format(
+                    'Le charbon produit ne peut pas dépasser le résidu combustible total.'),
+                    unsafe_allow_html=True)
         tf = st.number_input("T° eau finale (°C)", value=(float(td['tf']) if demo else None),
                               step=0.5, format='%.1f', key=f'tf_{phase}')
         if tf is None:
