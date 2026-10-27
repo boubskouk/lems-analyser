@@ -836,20 +836,23 @@ def generer_rapport_serie(ctx, tests_accumules, dernier_analyses, dernier_result
         _, _, _, hi = _mean_sd_ci90(vals)
         return _tier_inferieur(hi, seuils)
 
+    # (libellé, champ, décimales, calc_tier, affiche_IC90%)
+    # Structure calquée exactement sur le tableau-type du labo (Capt.PNG) :
+    # seules Efficacité (x2)/PM2,5/CO ont une ligne IC 90% — Productivité du
+    # charbon, Puissance de cuisson et Taux de combustion n'ont que Moy./ET.
     lignes = [
         ('Efficacité thermique sans charbon résiduel (%)', 'eff_sc', 1,
-         lambda v: _tier_eff_consv(v['Combine'])),
+         lambda v: _tier_eff_consv(v['Combine']), True),
         ('Efficacité thermique avec charbon résiduel (%)', 'eff', 1,
-         lambda v: _tier_eff_consv(v['Combine'])),
-        ('Productivité énergétique du charbon (%)', None, 1, lambda v: None),
-        ('Productivité massique du charbon (%)', None, 1, lambda v: None),
-        ('Puissance de cuisson (kW)', 'puissance_cuisson_W_kw', 2, lambda v: None),
-        ('Taux de combustion (g/min)', 'taux_combustion_g_min', 1, lambda v: None),
+         lambda v: _tier_eff_consv(v['Combine']), True),
+        ('Productivité énergétique du charbon (%)', None, 1, lambda v: None, False),
+        ('Productivité massique du charbon (%)', None, 1, lambda v: None, False),
+        ('Puissance de cuisson (kW)', 'puissance_cuisson_W_kw', 2, lambda v: None, False),
+        ('Taux de combustion (g/min)', 'taux_combustion_g_min', 1, lambda v: None, False),
         ('PM2,5 par énergie utile (mg/MJd)', 'pm_mjd', 1,
-         lambda v: _tier_mjd_consv(v['Combine'], SEUILS_PM_MG_MJD)),
+         lambda v: _tier_mjd_consv(v['Combine'], SEUILS_PM_MG_MJD), True),
         ('CO par énergie utile (g/MJd)', 'co_mjd', 2,
-         lambda v: _tier_mjd_consv(v['Combine'], SEUILS_CO_G_MJD)),
-        ('Sécurité (score)', None, 0, lambda v: None),
+         lambda v: _tier_mjd_consv(v['Combine'], SEUILS_CO_G_MJD), True),
     ]
 
     col_w = [32, 14, 26, 26, 26, 28, 28]
@@ -863,10 +866,11 @@ def generer_rapport_serie(ctx, tests_accumules, dernier_analyses, dernier_result
         for h in ('Métrique', '', 'Haute', 'Moyenne', 'Basse', 'Combiné', 'Performance (Tier)'):
             row.cell(h, style=entete)
 
-        for libelle, champ, dec, calc_tier in lignes:
+        for libelle, champ, dec, calc_tier, avec_ci in lignes:
             if champ is None:
-                # Métrique non calculée par l'app (productivité charbon, sécurité) :
-                # affichée "n.d." plutôt qu'une valeur inventée.
+                # Métrique non calculée par l'app (productivité charbon) :
+                # affichée "n.d." plutôt qu'une valeur inventée. 2 lignes
+                # (Moy./ET) seulement, comme dans le tableau-type du labo.
                 row = table.row()
                 row.cell(libelle, style=gras)
                 row.cell('Moy.', style=normal)
@@ -907,13 +911,21 @@ def generer_rapport_serie(ctx, tests_accumules, dernier_analyses, dernier_result
                 row.cell(moy[c][1], style=normal)
             row.cell('', style=normal)
 
-            if n_eff > 1:
+            if avec_ci and n_eff > 1:
                 row = table.row()
                 row.cell('', style=normal)
                 row.cell('IC 90%', style=normal)
                 for c in ('HP', 'MP', 'BP', 'Combine'):
                     row.cell(moy[c][2], style=normal)
                 row.cell('', style=normal)
+
+        # Sécurité : une seule ligne "Score", valeur unique (pas de ventilation
+        # par phase), exactement comme dans le tableau-type du labo.
+        row = table.row()
+        row.cell('Sécurité', style=gras)
+        row.cell('Score', style=normal)
+        row.cell('n.d.', style=normal, colspan=4)
+        row.cell('n.d.', style=normal)
 
     pdf.ln(2)
     pdf.set_font(pdf.FONT, 'I', 7.5)
