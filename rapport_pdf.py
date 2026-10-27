@@ -252,14 +252,17 @@ def _texte_remarques(ctx, resultats, est_serie):
     gravi = [c for c, r in (resultats or {}).items() if r.get('_pm_gravi_mg')]
     if gravi:
         remarques.append(
-            f"Conversion optique des PM2,5 avec une efficacité de diffusion massique fixe de "
-            f"{fr(MSE_PM, 1)} m²/g ; une pesée du filtre gravimétrique a été renseignée pour "
-            f"la/les phase(s) {', '.join(gravi)}."
+            f"Conversion optique des PM2,5 calibrée par la pesée du filtre gravimétrique pour "
+            f"la/les phase(s) {', '.join(gravi)} : efficacité de diffusion massique (MSE) "
+            f"dérivée spécifiquement pour cette/ces phase(s) — valeur généralement très "
+            f"différente de la constante par défaut ({fr(MSE_PM, 1)} m²/g), voir § 3."
         )
     else:
         remarques.append(
             f"Conversion optique des PM2,5 avec une efficacité de diffusion massique fixe de "
-            f"{fr(MSE_PM, 1)} m²/g, sans calibration par la pesée du filtre gravimétrique."
+            f"{fr(MSE_PM, 1)} m²/g (hypothèse de départ du labo, jamais validée indépendamment) "
+            f"— aucun filtre gravimétrique n'a été pesé pour calibrer cette valeur. Les PM2,5 "
+            f"de ce rapport doivent être pris avec prudence."
         )
     remarques.append(
         "Calculs vérifiés par comparaison avec le fichier de traitement de référence du "
